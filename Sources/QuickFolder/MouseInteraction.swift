@@ -16,6 +16,9 @@ struct MouseInteraction: NSViewRepresentable {
     /// Replaces the shared `model.hovered` tracking, for controls that sit on
     /// top of another hoverable view.
     var onHover: ((Bool) -> Void)? = nil
+    /// Vertical dragging, for reordering. The translation is in points,
+    /// positive downward. A drag never also counts as a click.
+    var onPan: ((PanPhase, CGFloat) -> Void)? = nil
 
     func makeNSView(context: Context) -> InteractionView {
         let view = InteractionView()
@@ -32,12 +35,15 @@ struct MouseInteraction: NSViewRepresentable {
     }
 }
 
+enum PanPhase { case began, changed, ended }
+
 final class InteractionView: NSView {
     var configuration: MouseInteraction?
 
     private var trackingArea: NSTrackingArea?
     private var mouseDownEvent: NSEvent?
     private var didStartDrag = false
+    private var isPanning = false
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -94,10 +100,24 @@ final class InteractionView: NSView {
         }
         mouseDownEvent = event
         didStartDrag = false
+        isPanning = false
         configuration.model.pressed = configuration.target
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if let onPan = configuration?.onPan, let down = mouseDownEvent {
+            // Window coordinates grow upward; report downward as positive.
+            let translation = down.locationInWindow.y - event.locationInWindow.y
+            if !isPanning {
+                guard abs(translation) > 3 else { return }
+                isPanning = true
+                didStartDrag = true
+                configuration?.model.pressed = nil
+                onPan(.began, 0)
+            }
+            onPan(.changed, translation)
+            return
+        }
         guard let configuration, let down = mouseDownEvent, !didStartDrag, let url = configuration.dragFile else { return }
         let distance = hypot(event.locationInWindow.x - down.locationInWindow.x, event.locationInWindow.y - down.locationInWindow.y)
         guard distance > 4 else { return }
@@ -122,6 +142,11 @@ final class InteractionView: NSView {
     override func mouseUp(with event: NSEvent) {
         defer { mouseDownEvent = nil }
         guard let configuration else { return }
+        if isPanning, let down = mouseDownEvent {
+            isPanning = false
+            configuration.onPan?(.ended, down.locationInWindow.y - event.locationInWindow.y)
+            return
+        }
         if configuration.model.pressed == configuration.target { configuration.model.pressed = nil }
         guard mouseDownEvent != nil, !didStartDrag else { return }
         let point = convert(event.locationInWindow, from: nil)

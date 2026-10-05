@@ -9,6 +9,7 @@ enum Preferences {
         static let folderPaths = "folderPaths"
         static let hapticsEnabled = "hapticsEnabled"
         static let showsShortcutsPage = "showsShortcutsPage"
+        static let pageOrder = "pageOrder"
         static let hasLaunchedBefore = "hasLaunchedBefore"
         static let hasSetUpLoginItem = "hasSetUpLoginItem"
     }
@@ -34,6 +35,13 @@ enum Preferences {
     static var showsShortcutsPage: Bool {
         get { defaults.bool(forKey: Key.showsShortcutsPage) }
         set { defaults.set(newValue, forKey: Key.showsShortcutsPage) }
+    }
+
+    /// Page ids (folder paths and "shortcuts") from top to bottom, as the user
+    /// arranged them. Pages missing from it keep their natural place at the end.
+    static var pageOrder: [String] {
+        get { defaults.stringArray(forKey: Key.pageOrder) ?? [] }
+        set { defaults.set(newValue, forKey: Key.pageOrder) }
     }
 
     static var hasLaunchedBefore: Bool {

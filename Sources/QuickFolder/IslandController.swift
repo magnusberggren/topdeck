@@ -136,6 +136,15 @@ final class IslandController: NSObject, IslandActions {
                 ?? FolderPage(url: url, name: FileManager.default.displayName(atPath: url.path))
         }
         if Preferences.showsShortcutsPage { pages.append(.shortcuts) }
+        // The user's arrangement first; anything new keeps its natural place after.
+        let order = Preferences.pageOrder
+        pages = pages.enumerated()
+            .sorted { lhs, rhs in
+                let left = order.firstIndex(of: lhs.element.id) ?? order.count + lhs.offset
+                let right = order.firstIndex(of: rhs.element.id) ?? order.count + rhs.offset
+                return left < right
+            }
+            .map(\.element)
         model.pages = pages
         model.pageIndex = model.pages.firstIndex { $0.id == currentID } ?? min(model.pageIndex, max(0, model.pages.count - 1))
 
@@ -319,6 +328,72 @@ final class IslandController: NSObject, IslandActions {
         NSWorkspace.shared.open(url)
     }
 
+    // MARK: - Arranging rows
+
+    func setArranging(_ arranging: Bool) {
+        guard model.isArranging != arranging else { return }
+        if arranging {
+            Haptics.perform(.levelChange)
+        } else {
+            Preferences.pageOrder = model.pages.map(\.id)
+        }
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+            model.isArranging = arranging
+            model.draggingPageID = nil
+            model.dragOffset = 0
+            model.pagePull = 0
+            model.scrollOffset = 0
+        }
+        rawScrollOffset = 0
+    }
+
+    /// Reordering: the dragged row follows the pointer and the others slide
+    /// aside as it passes their middle. The list only changes on drop.
+    func dragRow(_ id: String, phase: PanPhase, translation: CGFloat) {
+        guard let start = model.pages.firstIndex(where: { $0.id == id }) else { return }
+        let step = model.metrics.arrangeRowHeight(count: model.pages.count) + IslandMetrics.arrangeRowSpacing
+        let target = min(max(start + Int((translation / step).rounded()), 0), model.pages.count - 1)
+
+        var still = Transaction()
+        still.disablesAnimations = true
+
+        switch phase {
+        case .began:
+            Haptics.perform(.alignment)
+            withTransaction(still) {
+                model.dragTargetIndex = start
+                model.dragOffset = 0
+            }
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { model.draggingPageID = id }
+
+        case .changed:
+            withTransaction(still) { model.dragOffset = translation }
+            if target != model.dragTargetIndex {
+                Haptics.perform(.alignment)
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { model.dragTargetIndex = target }
+            }
+
+        case .ended:
+            // Glide into the slot, then commit the order. At that moment every
+            // row is already drawn where the new order puts it, so nothing jumps.
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                model.dragOffset = CGFloat(target - start) * step
+            } completion: { [weak self] in
+                guard let self else { return }
+                let currentID = self.model.currentPage?.id
+                withTransaction(still) {
+                    let page = self.model.pages.remove(at: start)
+                    self.model.pages.insert(page, at: target)
+                    self.model.pageIndex = self.model.pages.firstIndex { $0.id == currentID } ?? 0
+                    self.model.draggingPageID = nil
+                    self.model.dragOffset = 0
+                    self.model.dragTargetIndex = target
+                }
+                Preferences.pageOrder = self.model.pages.map(\.id)
+            }
+        }
+    }
+
     // MARK: - Cleanup
 
     func cleanUp() {
@@ -361,8 +436,15 @@ final class IslandController: NSObject, IslandActions {
             case .success:
                 succeeded = true
             case .failure(.needsAccessibility):
-                // macOS is showing its permission prompt; get out of its way.
-                self.collapse(waitForPointerToLeave: true)
+                // macOS only shows its own prompt the first time, so always
+                // say what's missing and link straight to the setting.
+                Haptics.perform(.generic)
+                self.showToast(Toast(
+                    symbol: "lock.fill",
+                    text: "Allow Accessibility to paste",
+                    url: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"),
+                    isWarning: true
+                ))
                 return
             case .failure:
                 succeeded = false
@@ -459,9 +541,15 @@ final class IslandController: NSObject, IslandActions {
     }
 
     func selectPage(_ index: Int) {
+        selectPage(index, forward: index > model.pageIndex)
+    }
+
+    /// `forward` says which way the pages slide, which matters when swiping
+    /// wraps from the last row back to the first.
+    private func selectPage(_ index: Int, forward: Bool) {
         guard model.pages.indices.contains(index), index != model.pageIndex else { return }
         // Set the direction first so the outgoing page picks it up before it leaves.
-        model.pageEdge = index > model.pageIndex ? .bottom : .top
+        model.pageEdge = forward ? .bottom : .top
         DispatchQueue.main.async { [self] in
             rawScrollOffset = 0
             withAnimation(.spring(response: 0.44, dampingFraction: 0.82)) {
@@ -505,6 +593,7 @@ final class IslandController: NSObject, IslandActions {
                 ? .spring(response: 0.36, dampingFraction: 0.9)
                 : .spring(response: 0.45, dampingFraction: 0.72)
             if model.state == .expanded { collapsedAt = Date() }
+            if model.isArranging { setArranging(false) }
             model.hovered = nil
             model.hoveredAction = nil
             model.pressed = nil
@@ -558,6 +647,7 @@ final class IslandController: NSObject, IslandActions {
         }
         if let scroll = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
             guard let self, event.window === self.panel, self.model.state == .expanded else { return event }
+            if self.model.isArranging { return nil }
             self.scroll(with: event)
             return nil
         }) {
@@ -597,7 +687,7 @@ final class IslandController: NSObject, IslandActions {
             }
 
         case .expanded:
-            if isMenuOpen || model.isDraggingFile { return }
+            if isMenuOpen || model.isDraggingFile || model.draggingPageID != nil { return }
             let rect = metrics.screenRect(for: .expanded).insetBy(dx: -10, dy: -10)
             if rect.contains(point) {
                 collapseTimer?.invalidate(); collapseTimer = nil
@@ -660,22 +750,17 @@ final class IslandController: NSObject, IslandActions {
         guard event.momentumPhase.isEmpty, !gestureSwitchedPage, model.pages.count > 1 else { return }
 
         rawPagePull += -event.scrollingDeltaY
-        let target = model.pageIndex + (rawPagePull > 0 ? 1 : -1)
-        let canSwitch = model.pages.indices.contains(target)
+        let forward = rawPagePull > 0
 
-        if canSwitch && abs(rawPagePull) >= Paging.threshold {
+        if abs(rawPagePull) >= Paging.threshold {
             gestureSwitchedPage = true
             Haptics.perform(.levelChange)
-            selectPage(target)
+            selectPage(wrappedPage(forward: forward), forward: forward)
             return
         }
-        if !canSwitch && abs(rawPagePull) >= Paging.threshold * 0.6 && !gestureHitEdge {
-            gestureHitEdge = true
-            Haptics.perform(.alignment)
-        }
 
-        // Heavy resistance while pulling, heavier still when there's nowhere to go.
-        let dimension: CGFloat = canSwitch ? 110 : 40
+        // Heavy resistance while pulling, so a small swipe springs back.
+        let dimension: CGFloat = 110
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
@@ -685,6 +770,12 @@ final class IslandController: NSObject, IslandActions {
         if event.phase == .ended || event.phase == .cancelled {
             releasePagePull()
         }
+    }
+
+    /// The next row up or down, going around from the last row to the first.
+    private func wrappedPage(forward: Bool) -> Int {
+        let count = model.pages.count
+        return (model.pageIndex + (forward ? 1 : -1) + count) % count
     }
 
     private func releasePagePull() {
@@ -712,13 +803,13 @@ final class IslandController: NSObject, IslandActions {
         lastWheelTime = now
         wheelPull += -dy
 
-        let target = model.pageIndex + (wheelPull > 0 ? 1 : -1)
-        if abs(wheelPull) >= Paging.wheelThreshold, model.pages.indices.contains(target) {
+        if abs(wheelPull) >= Paging.wheelThreshold {
+            let forward = wheelPull > 0
             wheelPull = 0
             wheelLockedUntil = now + 0.45
             wheelRelease?.cancel()
             Haptics.perform(.levelChange)
-            selectPage(target)
+            selectPage(wrappedPage(forward: forward), forward: forward)
             return
         }
 
@@ -917,6 +1008,9 @@ final class IslandController: NSObject, IslandActions {
         let deck = menuItem("Shortcuts Page", action: #selector(menuToggleShortcutsPage))
         deck.state = Preferences.showsShortcutsPage ? .on : .off
         menu.addItem(deck)
+        if model.pages.count > 1 {
+            menu.addItem(menuItem("Arrange Rows…", symbol: "line.3.horizontal", action: #selector(menuArrangeRows)))
+        }
         menu.addItem(.separator())
 
         let preview = menuItem("Preview New Files", action: #selector(menuTogglePreview))
@@ -1042,6 +1136,10 @@ final class IslandController: NSObject, IslandActions {
         }
     }
 
+    @objc private func menuArrangeRows() {
+        setArranging(true)
+    }
+
     @objc private func menuToggleShortcutsPage() {
         Preferences.showsShortcutsPage.toggle()
         withAnimation(.spring(response: 0.44, dampingFraction: 0.82)) { reloadFolders() }
@@ -1070,8 +1168,9 @@ final class IslandController: NSObject, IslandActions {
     /// `QF_DEBUG_STATE=expanded|peek` pins the island open for screenshots.
     /// With `expanded`: `QF_DEBUG_PAGE=n` opens page n, `QF_DEBUG_ACTIONS`
     /// runs every smart action, `QF_DEBUG_RUNKEY=n` presses deck key n,
-    /// `QF_DEBUG_EDITOR` opens the key editor, `QF_DEBUG_CONFIRM` shows the
-    /// cleanup confirmation, `QF_DEBUG_MENU` opens the options menu.
+    /// `QF_DEBUG_EDITOR` opens the key editor, `QF_DEBUG_ARRANGE` opens Arrange
+    /// mode, `QF_DEBUG_CONFIRM` shows the cleanup confirmation,
+    /// `QF_DEBUG_MENU` opens the options menu.
     private func applyDebugState() {
         guard let value = ProcessInfo.processInfo.environment["QF_DEBUG_STATE"] else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
@@ -1089,7 +1188,18 @@ final class IslandController: NSObject, IslandActions {
                 }
                 let env = ProcessInfo.processInfo.environment
                 if let index = env["QF_DEBUG_RUNKEY"].flatMap(Int.init), self.model.deckKeys.indices.contains(index) {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.run(self.model.deckKeys[index]) }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        // QF_DEBUG_FRONT=<bundle id> only presses the key if that app is in front.
+                        if let required = env["QF_DEBUG_FRONT"],
+                           NSWorkspace.shared.frontmostApplication?.bundleIdentifier != required {
+                            NSLog("QuickFolder debug: skipped key, %@ isn't in front", required)
+                            return
+                        }
+                        self.run(self.model.deckKeys[index])
+                    }
+                }
+                if env["QF_DEBUG_ARRANGE"] != nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.setArranging(true) }
                 }
                 if env["QF_DEBUG_EDITOR"] != nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.editKey(self.model.deckKeys.first) }

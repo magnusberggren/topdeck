@@ -24,7 +24,8 @@ launch turns on Open at Login.
 - **Live downloads:** while something downloads, the notch grows small wings with a progress ring and percentage, and the file sits at the front of its shelf with a ring. Works with any browser that reports progress to Finder (Safari, Chrome, Arc, Edge, Firefox); others get a spinner.
 - **Clean Up:** when a folder holds installers (.dmg, .pkg) added more than a week ago, a pill in the header shows how much space they take. Click once to see what it'll do, again to move them all to the Trash.
 - **Swipe sideways** to see older files (Shift-scroll with a mouse).
-- **Swipe up or down** to switch folders: Downloads and Desktop to start, add more from ⋯. The shelf resists until you've swiped far enough, then clicks over one folder, so a sloppy sideways swipe never switches. With a mouse, a few wheel clicks in a row switch.
+- **Swipe up or down** to switch rows: Downloads, Desktop and Shortcuts to start, add folders from ⋯. It goes around, so swiping up from the top row lands on the bottom one. The shelf resists until you've swiped far enough, then clicks over one row, so a sloppy sideways swipe never switches. With a mouse, a few wheel clicks in a row switch.
+- **Arrange rows:** click the row dots on the left (or ⋯ › Arrange Rows) and drag rows into the order you want. The top row is the one the island opens on.
 - **Haptics** on a Force Touch trackpad: a firm click when the island opens and when the folder changes, a light tick per file you point at, and a bump at the end of the shelf. Turn them off from ⋯.
 - **Folder button:** opens the folder in Finder's column view, sorted by Date Added. Finder's column view only has one sort setting for every folder, so this sets column view to Date Added everywhere.
 - **⋯ button:** jump to a folder, add or remove folders, hide the Shortcuts page, turn off new-file previews or haptics, toggle Open at Login, or quit.
@@ -38,7 +39,7 @@ Swipe past your folders to a deck of big keys, like a Stream Deck. A key can:
 - **Run Shortcut:** anything from the Shortcuts app.
 - **Run Command:** a zsh command.
 
-Click **+** to add one; right-click a key to edit, duplicate, reorder or delete it.
+Click **+** to add one; right-click a key to edit, duplicate, reorder or delete it. The editor supports the usual ⌘C, ⌘V, ⌘A and ⌘Z.
 
 When a file lands in any of the folders, the notch briefly shows what arrived.
 Hover it to open that folder's shelf.
@@ -63,7 +64,7 @@ swift build                                 # compile
 CONFIG=debug scripts/build.sh               # build/QuickFolder.app, debug
 QF_DEBUG_STATE=expanded build/QuickFolder.app/Contents/MacOS/QuickFolder   # keep the island open
 QF_DEBUG_STATE=expanded QF_DEBUG_PAGE=1 build/QuickFolder.app/Contents/MacOS/QuickFolder   # open on the second folder
-QF_DEBUG_STATE=expanded QF_DEBUG_ACTIONS=1 …   # also: QF_DEBUG_RUNKEY=n, QF_DEBUG_EDITOR, QF_DEBUG_CONFIRM, QF_DEBUG_MENU
+QF_DEBUG_STATE=expanded QF_DEBUG_ACTIONS=1 …   # also: QF_DEBUG_RUNKEY=n (+ QF_DEBUG_FRONT=<bundle id>), QF_DEBUG_EDITOR, QF_DEBUG_ARRANGE, QF_DEBUG_CONFIRM, QF_DEBUG_MENU
 QF_DEBUG_STATE=peek     build/QuickFolder.app/Contents/MacOS/QuickFolder   # keep the new-download preview open
 swift scripts/make-icon.swift               # regenerate Resources/AppIcon.icns
 ```

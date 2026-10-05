@@ -34,6 +34,8 @@ struct Toast: Equatable {
     var text: String
     /// Clicking the toast opens this.
     var url: URL?
+    /// Orange instead of green, for things that need the user's attention.
+    var isWarning = false
 }
 
 enum PeekContent: Equatable {
@@ -50,6 +52,9 @@ enum HoverTarget: Hashable {
     case addDeckKey
     case cleanup
     case toast
+    case pageRail
+    case arrangeRow(String)
+    case arrangeDone
     case peek
     case openFolder
     case settings
@@ -69,6 +74,8 @@ protocol IslandActions: AnyObject {
     func run(_ key: DeckKey)
     func editKey(_ key: DeckKey?)
     func showMenu(for key: DeckKey)
+    func setArranging(_ arranging: Bool)
+    func dragRow(_ id: String, phase: PanPhase, translation: CGFloat)
 }
 
 /// One page of the island: a folder, or the Shortcuts deck. The island pages
@@ -141,6 +148,15 @@ struct IslandMetrics: Equatable {
             width: max(rowWidth + Self.rowInset * 2, notchRect.width + 340),
             height: notchHeight + Self.tileHeight + 12
         )
+    }
+
+    static let arrangeRowSpacing: CGFloat = 4
+
+    /// Row height in Arrange mode, so every row fits below the header.
+    func arrangeRowHeight(count: Int) -> CGFloat {
+        let available = expandedBody.height - notchHeight - 14
+        let rows = CGFloat(max(count, 1))
+        return min(28, (available - Self.arrangeRowSpacing * (rows - 1)) / rows)
     }
 
     var activityBody: CGSize {
@@ -256,6 +272,15 @@ final class IslandModel {
     /// The cleanup pill asks "Trash 12 old installers?" before doing it.
     var isConfirmingCleanup = false
 
+    /// Arrange mode: the rows become a list you drag to reorder.
+    var isArranging = false
+    /// The row being dragged and how far it has moved. The list itself only
+    /// changes on drop; until then the other rows just slide aside.
+    var draggingPageID: String?
+    var dragOffset: CGFloat = 0
+    /// Where the dragged row would land if dropped now.
+    var dragTargetIndex = 0
+
     var deckKeys: [DeckKey] = []
     /// Briefly true or false after a key runs, for the checkmark or cross.
     var deckResults: [UUID: Bool] = [:]
@@ -271,6 +296,20 @@ final class IslandModel {
     var items: [DownloadItem] { currentPage?.items ?? [] }
     var access: FolderAccess { currentPage?.access ?? .ok }
     var folderName: String { currentPage?.name ?? "" }
+
+    /// How far a row in Arrange mode is drawn from its slot while another row
+    /// is dragged past it.
+    func arrangeOffset(for id: String) -> CGFloat {
+        guard let dragged = draggingPageID,
+              let from = pages.firstIndex(where: { $0.id == dragged }),
+              let index = pages.firstIndex(where: { $0.id == id }) else { return 0 }
+        if id == dragged { return dragOffset }
+        let step = metrics.arrangeRowHeight(count: pages.count) + IslandMetrics.arrangeRowSpacing
+        let to = dragTargetIndex
+        if from < to, index > from, index <= to { return -step }
+        if from > to, index >= to, index < from { return step }
+        return 0
+    }
 
     /// Downloads in progress that belong on the current page.
     var pageDownloads: [Activity] {

@@ -71,18 +71,27 @@ private struct ExpandedView: View {
                 .frame(height: model.metrics.notchHeight)
 
             ZStack {
-                PageContent(model: model)
-                    .id(model.currentPage?.id)
-                    .transition(slide)
+                if model.isArranging {
+                    ArrangeView(model: model)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                } else {
+                    ZStack {
+                        PageContent(model: model)
+                            .id(model.currentPage?.id)
+                            .transition(slide)
+                    }
+                    .offset(y: -pull)
+                    .opacity(1 - Double(min(abs(pull) / 90, 0.45)))
+                    .transition(.opacity)
+                }
             }
-            .offset(y: -pull)
-            .opacity(1 - Double(min(abs(pull) / 90, 0.45)))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
             .overlay(alignment: .leading) {
-                if model.pages.count > 1 {
-                    PageDots(count: model.pages.count, index: model.pageIndex, pull: pull)
-                        .padding(.leading, 5)
+                if model.pages.count > 1 && !model.isArranging {
+                    PageDots(model: model, pull: pull)
+                        .padding(.leading, 2)
+                        .transition(.opacity)
                 }
             }
         }
@@ -126,24 +135,149 @@ private struct PageContent: View {
     }
 }
 
-/// A vertical page indicator, so the folders read as a stack you swipe through.
+/// A vertical page indicator, so the rows read as a stack you swipe through.
+/// Clicking it opens Arrange mode.
 private struct PageDots: View {
-    let count: Int
-    let index: Int
+    let model: IslandModel
     let pull: CGFloat
 
     var body: some View {
+        let isHovered = model.hovered == .pageRail
         VStack(spacing: 4) {
-            ForEach(0..<count, id: \.self) { dot in
+            ForEach(0..<model.pages.count, id: \.self) { dot in
                 Capsule()
-                    .fill(.white.opacity(dot == index ? 0.85 : 0.25))
-                    .frame(width: 4, height: dot == index ? 14 : 4)
+                    .fill(.white.opacity(dot == model.pageIndex ? 0.85 : (isHovered ? 0.5 : 0.25)))
+                    .frame(width: 4, height: dot == model.pageIndex ? 14 : 4)
             }
         }
-        // Leans toward the folder you're pulling to.
+        // Leans toward the row you're pulling to.
         .offset(y: -pull * 0.12)
-        .animation(.spring(response: 0.38, dampingFraction: 0.7), value: index)
+        .frame(width: 12)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(.white.opacity(isHovered ? 0.1 : 0)))
+        .scaleEffect(isHovered ? 1.1 : 1)
+        .overlay {
+            if model.state == .expanded {
+                MouseInteraction(target: .pageRail, model: model) { model.actions?.setArranging(true) }
+            }
+        }
+        .animation(.spring(response: 0.38, dampingFraction: 0.7), value: model.pageIndex)
+        .animation(.smooth(duration: 0.18), value: isHovered)
         .padding(.bottom, 8)
+        .accessibilityLabel("Arrange rows")
+    }
+}
+
+/// The rows as a list you drag to reorder. The top row is the one the
+/// island opens on.
+private struct ArrangeView: View {
+    let model: IslandModel
+
+    var body: some View {
+        let height = model.metrics.arrangeRowHeight(count: model.pages.count)
+        VStack(spacing: IslandMetrics.arrangeRowSpacing) {
+            ForEach(model.pages) { page in
+                ArrangeRow(page: page, isFirst: isFirst(page), height: height, model: model)
+            }
+        }
+        .frame(width: 380)
+        .padding(.bottom, 10)
+        .frame(maxHeight: .infinity)
+    }
+
+    /// The row that will open first, counting where a dragged row would land.
+    private func isFirst(_ page: FolderPage) -> Bool {
+        if let dragged = model.draggingPageID {
+            if model.dragTargetIndex == 0 { return page.id == dragged }
+            let rest = model.pages.filter { $0.id != dragged }
+            return rest.first?.id == page.id
+        }
+        return model.pages.first?.id == page.id
+    }
+}
+
+private struct ArrangeRow: View {
+    let page: FolderPage
+    let isFirst: Bool
+    let height: CGFloat
+    let model: IslandModel
+
+    var body: some View {
+        let isDragging = model.draggingPageID == page.id
+        let isHovered = model.hovered == .arrangeRow(page.id) || isDragging
+
+        HStack(spacing: 9) {
+            icon
+                .frame(width: height * 0.68, height: height * 0.68)
+            Text(page.name)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if isFirst {
+                Text("Opens first")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .transition(.opacity)
+            }
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(isHovered ? 0.8 : 0.4))
+        }
+        .padding(.horizontal, 10)
+        .frame(height: height)
+        .background(
+            RoundedRectangle(cornerRadius: min(9, height / 2.6), style: .continuous)
+                .fill(Color(white: isDragging ? 0.24 : (isHovered ? 0.17 : 0.11)))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: min(9, height / 2.6), style: .continuous)
+                .strokeBorder(.white.opacity(page.id == model.currentPage?.id ? 0.25 : 0), lineWidth: 1)
+        )
+        // A shadow only while lifted. An always-on .shadow (even fully clear)
+        // made SwiftUI drop a moved row's background after reordering.
+        .background {
+            if isDragging {
+                RoundedRectangle(cornerRadius: min(9, height / 2.6), style: .continuous)
+                    .fill(.black.opacity(0.7))
+                    .blur(radius: 8)
+                    .offset(y: 4)
+                    .transition(.opacity)
+            }
+        }
+        .scaleEffect(isDragging ? 1.04 : 1)
+        .offset(y: model.arrangeOffset(for: page.id))
+        .zIndex(isDragging ? 1 : 0)
+        .overlay {
+            if model.state == .expanded {
+                MouseInteraction(
+                    target: .arrangeRow(page.id),
+                    model: model,
+                    onClick: {
+                        if let index = model.pages.firstIndex(where: { $0.id == page.id }) {
+                            model.actions?.selectPage(index)
+                        }
+                        model.actions?.setArranging(false)
+                    },
+                    onPan: { phase, translation in
+                        model.actions?.dragRow(page.id, phase: phase, translation: translation)
+                    }
+                )
+            }
+        }
+        .animation(.smooth(duration: 0.15), value: isHovered)
+        .accessibilityLabel(page.name)
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        if page.kind == .shortcuts {
+            DeckKeyFace(symbol: "square.grid.2x2.fill", color: .purple, size: height * 0.68)
+        } else {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: page.url.path))
+                .resizable()
+                .interpolation(.high)
+        }
     }
 }
 
@@ -154,7 +288,12 @@ private struct HeaderView: View {
         let page = model.currentPage
         HStack(spacing: 2) {
             ZStack(alignment: .leading) {
-                if let toast = model.toast {
+                if model.isArranging {
+                    Text("Arrange Rows")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .transition(.push(from: .bottom).combined(with: .opacity))
+                } else if let toast = model.toast {
                     ToastView(toast: toast, model: model)
                         .transition(.push(from: .bottom).combined(with: .opacity))
                 } else {
@@ -168,8 +307,23 @@ private struct HeaderView: View {
             }
             .clipped()
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: model.toast)
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: model.isArranging)
 
             Spacer(minLength: model.metrics.notchRect.width + 24)
+
+            if model.isArranging {
+                DoneButton(model: model)
+            } else {
+                headerButtons(page)
+            }
+        }
+        .padding(.leading, 22)
+        .padding(.trailing, 14)
+    }
+
+    @ViewBuilder
+    private func headerButtons(_ page: FolderPage?) -> some View {
+        HStack(spacing: 2) {
 
             if page?.kind == .folder, let cleanup = page?.cleanup {
                 CleanupPill(cleanup: cleanup, model: model)
@@ -190,8 +344,29 @@ private struct HeaderView: View {
                 model.actions?.showSettingsMenu()
             }
         }
-        .padding(.leading, 22)
-        .padding(.trailing, 14)
+    }
+}
+
+private struct DoneButton: View {
+    let model: IslandModel
+
+    var body: some View {
+        let isHovered = model.hovered == .arrangeDone
+        let isPressed = model.pressed == .arrangeDone
+        Text("Done")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .frame(height: 22)
+            .background(Capsule().fill(Color(red: 0.04, green: 0.52, blue: 1.0).opacity(isHovered ? 1 : 0.85)))
+            .scaleEffect(isPressed ? 0.92 : 1)
+            .overlay {
+                if model.state == .expanded {
+                    MouseInteraction(target: .arrangeDone, model: model) { model.actions?.setArranging(false) }
+                }
+            }
+            .animation(.smooth(duration: 0.15), value: isHovered)
+            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isPressed)
     }
 }
 
@@ -206,7 +381,7 @@ private struct ToastView: View {
         HStack(spacing: 6) {
             Image(systemName: toast.symbol)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color(red: 0.2, green: 0.78, blue: 0.35))
+                .foregroundStyle(toast.isWarning ? Color(red: 1, green: 0.62, blue: 0.04) : Color(red: 0.2, green: 0.78, blue: 0.35))
                 .symbolEffect(.bounce, value: toast)
             Text(toast.text)
                 .font(.system(size: 12, weight: .semibold))
