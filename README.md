@@ -20,11 +20,25 @@ launch turns on Open at Login.
 - **Drag** a file out to move it, like dragging out of Finder. Hold Option to copy. The island gets out of the way as soon as the file leaves it.
 - **Right-click** for Open With, Show in Finder, Quick Look, Copy and Move to Trash.
 - **Archives** (.zip, .tar.gz and friends) get a small button when you point at them: it extracts next to the archive and moves the archive to the Trash. One item inside lands as is; several go into a folder named after the archive. Nothing is ever overwritten.
+- **Disk images** (.dmg) get an Install button: it mounts the image, copies the app to /Applications (an older version goes to the Trash), ejects, and trashes the .dmg. Images with a license agreement or an installer package open normally instead.
+- **Live downloads:** while something downloads, the notch grows small wings with a progress ring and percentage, and the file sits at the front of its shelf with a ring. Works with any browser that reports progress to Finder (Safari, Chrome, Arc, Edge, Firefox); others get a spinner.
+- **Clean Up:** when a folder holds installers (.dmg, .pkg) added more than a week ago, a pill in the header shows how much space they take. Click once to see what it'll do, again to move them all to the Trash.
 - **Swipe sideways** to see older files (Shift-scroll with a mouse).
 - **Swipe up or down** to switch folders: Downloads and Desktop to start, add more from ⋯. The shelf resists until you've swiped far enough, then clicks over one folder, so a sloppy sideways swipe never switches. With a mouse, a few wheel clicks in a row switch.
 - **Haptics** on a Force Touch trackpad: a firm click when the island opens and when the folder changes, a light tick per file you point at, and a bump at the end of the shelf. Turn them off from ⋯.
 - **Folder button:** opens the folder in Finder's column view, sorted by Date Added. Finder's column view only has one sort setting for every folder, so this sets column view to Date Added everywhere.
-- **⋯ button:** jump to a folder, add or remove folders, turn off new-file previews or haptics, toggle Open at Login, or quit.
+- **⋯ button:** jump to a folder, add or remove folders, hide the Shortcuts page, turn off new-file previews or haptics, toggle Open at Login, or quit.
+
+### Shortcuts page
+
+Swipe past your folders to a deck of big keys, like a Stream Deck. A key can:
+
+- **Paste Text:** types a saved prompt or snippet into whatever text field you're in, optionally pressing Return. `{clipboard}`, `{date}` and `{time}` are filled in.
+- **Open Website** or **Open App**.
+- **Run Shortcut:** anything from the Shortcuts app.
+- **Run Command:** a zsh command.
+
+Click **+** to add one; right-click a key to edit, duplicate, reorder or delete it.
 
 When a file lands in any of the folders, the notch briefly shows what arrived.
 Hover it to open that folder's shelf.
@@ -38,7 +52,9 @@ screen instead.
 | --- | --- | --- |
 | Downloads and Desktop folders | First launch | To list your files |
 | Automation → Finder | First click on the folder button | To open the folder in column view |
-| Accessibility | First click on the folder button | To set Finder's sort to Date Added (Finder has no scripting command for column-view sorting) |
+| Accessibility | First click on the folder button or a Paste Text key | To set Finder's sort to Date Added, and to press ⌘V for Paste Text |
+| Removable volumes | First Install | To look inside the mounted disk image |
+| App Management | First Install that replaces an existing app | macOS protects installed apps from being replaced |
 
 ## Develop
 
@@ -47,6 +63,7 @@ swift build                                 # compile
 CONFIG=debug scripts/build.sh               # build/QuickFolder.app, debug
 QF_DEBUG_STATE=expanded build/QuickFolder.app/Contents/MacOS/QuickFolder   # keep the island open
 QF_DEBUG_STATE=expanded QF_DEBUG_PAGE=1 build/QuickFolder.app/Contents/MacOS/QuickFolder   # open on the second folder
+QF_DEBUG_STATE=expanded QF_DEBUG_ACTIONS=1 …   # also: QF_DEBUG_RUNKEY=n, QF_DEBUG_EDITOR, QF_DEBUG_CONFIRM, QF_DEBUG_MENU
 QF_DEBUG_STATE=peek     build/QuickFolder.app/Contents/MacOS/QuickFolder   # keep the new-download preview open
 swift scripts/make-icon.swift               # regenerate Resources/AppIcon.icns
 ```
@@ -66,4 +83,7 @@ your keychain, so macOS keeps the permissions across rebuilds. Set
 | `MouseInteraction.swift` | AppKit hover, click and drag, since the app never becomes active |
 | `DownloadsMonitor.swift` | Watches the folder and skips downloads that are still in progress |
 | `ThumbnailStore.swift` | Quick Look thumbnails, Finder icons until they load |
-| `FileActions.swift` | Open, reveal, trash, Quick Look, and the Finder column view |
+| `FileActions.swift` | Open, reveal, trash, Quick Look, archives, and the Finder column view |
+| `SmartActions.swift` | Per-file-type buttons and the disk image installer |
+| `DownloadProgress.swift` | Listens for the download progress browsers report |
+| `Deck.swift`, `DeckEditor.swift` | Shortcuts keys: storage, running them, and the editor window |

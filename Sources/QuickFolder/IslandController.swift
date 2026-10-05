@@ -39,10 +39,21 @@ final class IslandController: NSObject, IslandActions {
     private var collapsedAt = Date.distantPast
     private var openWithMenu: OpenWithMenu?
 
-    /// While QuickFolder itself is adding files (extracting), they shouldn't
-    /// pop up as new downloads.
-    private var runningExtractions = 0
+    /// While QuickFolder itself is adding files (extracting, installing),
+    /// they shouldn't pop up as new downloads.
+    private var runningTasks = 0
     private var quietUntil = Date.distantPast
+
+    private let progressWatcher = DownloadProgressWatcher()
+    /// Partial files seen in each folder, by folder path.
+    private var partials: [String: [String]] = [:]
+    private var reportedDownloads: [ReportedDownload] = []
+    /// Extractions and installs QuickFolder is running.
+    private var tasks: [Activity] = []
+
+    private let deckEditor = DeckEditor()
+    private var toastTimer: Timer?
+    private var cleanupConfirmTimer: Timer?
 
     #if DEBUG
     private var pinnedState: IslandState?
@@ -79,6 +90,11 @@ final class IslandController: NSObject, IslandActions {
         updateScreen()
         panel.orderFrontRegardless()
 
+        model.deckKeys = DeckStore.load()
+        progressWatcher.onChange = { [weak self] downloads in
+            self?.reportedDownloads = downloads
+            self?.rebuildActivities()
+        }
         reloadFolders()
 
         installEventMonitors()
@@ -112,80 +128,334 @@ final class IslandController: NSObject, IslandActions {
         for (path, monitor) in monitors where !paths.contains(path) {
             monitor.stop()
             monitors[path] = nil
+            partials[path] = nil
         }
 
-        model.pages = urls.map { url in
+        var pages = urls.map { url in
             model.pages.first { $0.id == url.path }
                 ?? FolderPage(url: url, name: FileManager.default.displayName(atPath: url.path))
         }
+        if Preferences.showsShortcutsPage { pages.append(.shortcuts) }
+        model.pages = pages
         model.pageIndex = model.pages.firstIndex { $0.id == currentID } ?? min(model.pageIndex, max(0, model.pages.count - 1))
 
         for url in urls where monitors[url.path] == nil {
             let id = url.path
             let monitor = DownloadsMonitor(folder: url)
-            monitor.onChange = { [weak self] items, access in self?.apply(items: items, access: access, to: id) }
+            monitor.onChange = { [weak self] scan in self?.apply(scan, to: id) }
             monitor.onNewDownload = { [weak self] item in self?.announce(item, in: id) }
             monitors[id] = monitor
             monitor.start()
         }
+        progressWatcher.watch(urls)
+        rebuildActivities()
     }
 
-    private func apply(items: [DownloadItem], access: FolderAccess, to pageID: String) {
+    private func apply(_ scan: FolderScan, to pageID: String) {
         guard let index = model.pages.firstIndex(where: { $0.id == pageID }) else { return }
         let isVisible = model.state == .expanded && index == model.pageIndex
         withAnimation(isVisible ? .spring(response: 0.42, dampingFraction: 0.84) : nil) {
-            model.pages[index].items = items
-            model.pages[index].access = access
+            model.pages[index].items = scan.items
+            model.pages[index].access = scan.access
+            model.pages[index].cleanup = scan.cleanup
             if isVisible && model.scrollOffset > model.maxScrollOffset {
                 model.scrollOffset = model.maxScrollOffset
                 rawScrollOffset = model.scrollOffset
             }
         }
         model.thumbnails.sync(with: model.pages.flatMap(\.items))
+        if partials[pageID] != scan.partials {
+            partials[pageID] = scan.partials
+            rebuildActivities()
+        }
+    }
+
+    // MARK: - Activity
+
+    /// Merges what browsers report with the partial files on disk (for apps
+    /// that don't report progress) and QuickFolder's own tasks.
+    private func rebuildActivities() {
+        var downloads: [String: Activity] = [:]
+        for (folder, names) in partials {
+            for name in names {
+                let id = folder + "/" + name
+                downloads[id] = Activity(id: id, name: name, fraction: nil, kind: .download, folderPath: folder)
+            }
+        }
+        for report in reportedDownloads where monitors[report.folderPath] != nil {
+            let id = report.folderPath + "/" + report.name
+            downloads[id] = Activity(id: id, name: report.name, fraction: report.fraction, kind: .download, folderPath: report.folderPath)
+        }
+
+        let activities = downloads.values.sorted { $0.id < $1.id } + tasks
+        guard activities != model.activities else { return }
+
+        let isVisible = model.state == .expanded
+        withAnimation(isVisible ? .spring(response: 0.42, dampingFraction: 0.84) : nil) {
+            model.activities = activities
+        }
+        if model.state == .collapsed || model.state == .activity {
+            setState(restState)
+        }
+    }
+
+    /// Where the island settles when nothing is being looked at.
+    private var restState: IslandState {
+        model.activities.isEmpty ? .collapsed : .activity
     }
 
     private func announce(_ item: DownloadItem, in pageID: String) {
         guard Preferences.showsNewDownloadPreview, model.state != .expanded, !model.isDraggingFile,
-              runningExtractions == 0, Date() > quietUntil,
+              runningTasks == 0, Date() > quietUntil,
               let page = model.pages.first(where: { $0.id == pageID }) else { return }
         let label = page.isDownloads ? "Downloaded" : "Added to \(page.name)"
         showPeek(.download(item, pageID: pageID, label: label), duration: Timing.peekDuration)
     }
 
-    func extract(_ item: DownloadItem) {
+    func perform(_ action: SmartAction, on item: DownloadItem) {
         guard !model.busyItems.contains(item.id) else { return }
         model.busyItems.insert(item.id)
-        runningExtractions += 1
+        runningTasks += 1
+        let task = Activity(
+            id: "task:" + item.id,
+            name: item.name,
+            fraction: nil,
+            kind: action == .extract ? .extract : .install,
+            folderPath: item.url.deletingLastPathComponent().path
+        )
+        tasks.append(task)
+        rebuildActivities()
 
-        Archive.extractAndTrash(item.url) { [weak self] result in
+        let finish = { [weak self] in
             guard let self else { return }
-            self.runningExtractions -= 1
+            self.runningTasks -= 1
             self.quietUntil = Date().addingTimeInterval(2)
             self.model.busyItems.remove(item.id)
+            self.tasks.removeAll { $0.id == task.id }
+            self.rebuildActivities()
+        }
 
-            switch result {
-            case .success(let url):
-                FileActions.playTrashSound()
-                Haptics.perform(.levelChange)
-                withAnimation(.smooth(duration: 0.3)) { self.model.highlightedID = url.path }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                    guard self.model.highlightedID == url.path else { return }
-                    withAnimation(.smooth(duration: 0.6)) { self.model.highlightedID = nil }
+        switch action {
+        case .extract:
+            Archive.extractAndTrash(item.url) { [weak self] result in
+                finish()
+                guard let self else { return }
+                switch result {
+                case .success(let url):
+                    FileActions.playTrashSound()
+                    Haptics.perform(.levelChange)
+                    self.highlight(url)
+                    self.announceResult(url, label: "Extracted")
+                case .failure:
+                    self.note("Couldn’t extract", on: item)
                 }
-                // Finished after the island closed: say so from the notch.
-                if self.model.state != .expanded {
-                    let folder = url.deletingLastPathComponent().path
-                    let pageID = self.model.pages.first { $0.url.path == folder }?.id ?? folder
-                    self.showPeek(.download(DownloadItem(url: url), pageID: pageID, label: "Extracted"), duration: Timing.peekDuration)
-                }
-            case .failure:
-                NSSound.beep()
-                self.model.tileNotes[item.id] = "Couldn’t extract"
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                    self.model.tileNotes[item.id] = nil
+            }
+
+        case .install:
+            DiskImageInstaller.install(item.url) { [weak self] result in
+                finish()
+                guard let self else { return }
+                switch result {
+                case .success(.installed(let app)):
+                    FileActions.playTrashSound()
+                    Haptics.perform(.levelChange)
+                    let name = FileManager.default.displayName(atPath: app.path)
+                    if self.model.state == .expanded {
+                        self.showToast(Toast(symbol: "checkmark.circle.fill", text: "Installed \(name)", url: app))
+                    } else {
+                        self.showPeek(.download(DownloadItem(url: app), pageID: "", label: "Installed"), duration: Timing.peekDuration)
+                    }
+                case .success(.handedOff):
+                    self.collapse(waitForPointerToLeave: true)
+                case .failure(.appRunning(let name)):
+                    self.note("Quit \(name) first", on: item)
+                case .failure(.needsAppManagement):
+                    self.note("Needs permission", on: item)
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
+                        NSWorkspace.shared.open(url)
+                    }
+                case .failure:
+                    self.note("Couldn’t install", on: item)
                 }
             }
         }
+    }
+
+    private func highlight(_ url: URL) {
+        withAnimation(.smooth(duration: 0.3)) { model.highlightedID = url.path }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
+            guard let self, self.model.highlightedID == url.path else { return }
+            withAnimation(.smooth(duration: 0.6)) { self.model.highlightedID = nil }
+        }
+    }
+
+    /// Finished after the island closed: say so from the notch.
+    private func announceResult(_ url: URL, label: String) {
+        guard model.state != .expanded else { return }
+        let folder = url.deletingLastPathComponent().path
+        let pageID = model.pages.first { $0.kind == .folder && $0.url.path == folder }?.id ?? folder
+        showPeek(.download(DownloadItem(url: url), pageID: pageID, label: label), duration: Timing.peekDuration)
+    }
+
+    private func note(_ text: String, on item: DownloadItem) {
+        NSSound.beep()
+        model.tileNotes[item.id] = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.model.tileNotes[item.id] = nil
+        }
+    }
+
+    private func showToast(_ toast: Toast) {
+        toastTimer?.invalidate()
+        model.toast = toast
+        toastTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in
+            self?.model.toast = nil
+        }
+    }
+
+    func openToast() {
+        guard let url = model.toast?.url else { return }
+        collapse(waitForPointerToLeave: true)
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Cleanup
+
+    func cleanUp() {
+        guard let page = model.currentPage, let cleanup = page.cleanup else { return }
+        guard model.isConfirmingCleanup else {
+            Haptics.perform(.alignment)
+            model.isConfirmingCleanup = true
+            cleanupConfirmTimer?.invalidate()
+            cleanupConfirmTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in
+                self?.model.isConfirmingCleanup = false
+            }
+            return
+        }
+
+        cleanupConfirmTimer?.invalidate()
+        model.isConfirmingCleanup = false
+        let size = ByteCountFormatter.string(fromByteCount: cleanup.bytes, countStyle: .file)
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            if let index = model.pages.firstIndex(where: { $0.id == page.id }) { model.pages[index].cleanup = nil }
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            NSWorkspace.shared.recycle(cleanup.files) { _, _ in
+                DispatchQueue.main.async { [weak self] in
+                    FileActions.playTrashSound()
+                    Haptics.perform(.levelChange)
+                    self?.showToast(Toast(symbol: "sparkles", text: "Freed \(size)", url: nil))
+                }
+            }
+        }
+    }
+
+    // MARK: - Shortcuts deck
+
+    func run(_ key: DeckKey) {
+        Haptics.perform(.generic)
+        DeckRunner.run(key) { [weak self] result in
+            guard let self else { return }
+            let succeeded: Bool
+            switch result {
+            case .success:
+                succeeded = true
+            case .failure(.needsAccessibility):
+                // macOS is showing its permission prompt; get out of its way.
+                self.collapse(waitForPointerToLeave: true)
+                return
+            case .failure:
+                succeeded = false
+                NSSound.beep()
+            }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { self.model.deckResults[key.id] = succeeded }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                withAnimation(.smooth(duration: 0.3)) { self.model.deckResults[key.id] = nil }
+            }
+        }
+    }
+
+    func editKey(_ key: DeckKey?) {
+        collapse(waitForPointerToLeave: true)
+        deckEditor.show(key, onSave: { [weak self] saved in
+            guard let self else { return }
+            if let index = self.model.deckKeys.firstIndex(where: { $0.id == saved.id }) {
+                self.model.deckKeys[index] = saved
+            } else {
+                self.model.deckKeys.append(saved)
+            }
+            DeckStore.save(self.model.deckKeys)
+        }, onDelete: { [weak self] deleted in
+            self?.deleteKey(deleted.id)
+        })
+    }
+
+    private func deleteKey(_ id: UUID) {
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            model.deckKeys.removeAll { $0.id == id }
+        }
+        DeckStore.save(model.deckKeys)
+    }
+
+    private func moveKey(_ id: UUID, by offset: Int) {
+        guard let index = model.deckKeys.firstIndex(where: { $0.id == id }),
+              model.deckKeys.indices.contains(index + offset) else { return }
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            model.deckKeys.swapAt(index, index + offset)
+        }
+        DeckStore.save(model.deckKeys)
+    }
+
+    func showMenu(for key: DeckKey) {
+        let menu = NSMenu()
+        let index = model.deckKeys.firstIndex { $0.id == key.id } ?? 0
+        func add(_ title: String, _ symbol: String, enabled: Bool = true, _ action: Selector) {
+            let item = menuItem(title, symbol: symbol, action: action)
+            item.representedObject = key.id
+            item.isEnabled = enabled
+            menu.addItem(item)
+        }
+        add("Edit…", "pencil", #selector(menuEditKey(_:)))
+        add("Duplicate", "plus.square.on.square", #selector(menuDuplicateKey(_:)))
+        menu.addItem(.separator())
+        add("Move Left", "arrow.left", enabled: index > 0, #selector(menuMoveKeyLeft(_:)))
+        add("Move Right", "arrow.right", enabled: index < model.deckKeys.count - 1, #selector(menuMoveKeyRight(_:)))
+        menu.addItem(.separator())
+        add("Delete", "trash", #selector(menuDeleteKey(_:)))
+        menu.autoenablesItems = false
+        present(menu)
+    }
+
+    private func key(from sender: NSMenuItem) -> DeckKey? {
+        guard let id = sender.representedObject as? UUID else { return nil }
+        return model.deckKeys.first { $0.id == id }
+    }
+
+    @objc private func menuEditKey(_ sender: NSMenuItem) {
+        guard let key = key(from: sender) else { return }
+        editKey(key)
+    }
+
+    @objc private func menuDuplicateKey(_ sender: NSMenuItem) {
+        guard let key = key(from: sender), let index = model.deckKeys.firstIndex(of: key) else { return }
+        var copy = key
+        copy.id = UUID()
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            model.deckKeys.insert(copy, at: index + 1)
+        }
+        DeckStore.save(model.deckKeys)
+    }
+
+    @objc private func menuMoveKeyLeft(_ sender: NSMenuItem) {
+        if let key = key(from: sender) { moveKey(key.id, by: -1) }
+    }
+
+    @objc private func menuMoveKeyRight(_ sender: NSMenuItem) {
+        if let key = key(from: sender) { moveKey(key.id, by: 1) }
+    }
+
+    @objc private func menuDeleteKey(_ sender: NSMenuItem) {
+        if let key = key(from: sender) { deleteKey(key.id) }
     }
 
     func selectPage(_ index: Int) {
@@ -200,6 +470,7 @@ final class IslandController: NSObject, IslandActions {
                 model.scrollOffset = 0
                 model.hovered = nil
                 model.hoveredAction = nil
+                model.isConfirmingCleanup = false
             }
             if let page = model.currentPage, page.access != .ok { monitors[page.id]?.refresh() }
         }
@@ -229,15 +500,18 @@ final class IslandController: NSObject, IslandActions {
             Haptics.perform(.levelChange)
         case .peek:
             animation = .spring(response: 0.46, dampingFraction: 0.7)
-        case .collapsed:
-            animation = .spring(response: 0.36, dampingFraction: 0.9)
-            collapsedAt = Date()
+        case .collapsed, .activity:
+            animation = model.state == .expanded
+                ? .spring(response: 0.36, dampingFraction: 0.9)
+                : .spring(response: 0.45, dampingFraction: 0.72)
+            if model.state == .expanded { collapsedAt = Date() }
             model.hovered = nil
             model.hoveredAction = nil
             model.pressed = nil
+            model.isConfirmingCleanup = false
         }
 
-        panel.ignoresMouseEvents = (state == .collapsed && !model.isDraggingFile)
+        panel.ignoresMouseEvents = (state == .collapsed || state == .activity) && !model.isDraggingFile
         withAnimation(animation) { model.state = state }
     }
 
@@ -248,7 +522,7 @@ final class IslandController: NSObject, IslandActions {
         if pinnedState != nil { return }
         #endif
         if waitForPointerToLeave { waitsForPointerToLeave = true }
-        setState(.collapsed)
+        setState(restState)
     }
 
     private func showPeek(_ content: PeekContent, duration: TimeInterval) {
@@ -299,8 +573,11 @@ final class IslandController: NSObject, IslandActions {
         let metrics = model.metrics
 
         switch model.state {
-        case .collapsed:
-            let inZone = metrics.hotZone.contains(point)
+        case .collapsed, .activity:
+            let zone = model.state == .activity
+                ? metrics.screenRect(for: .activity).union(metrics.hotZone)
+                : metrics.hotZone
+            let inZone = zone.contains(point)
             if waitsForPointerToLeave {
                 if !inZone { waitsForPointerToLeave = false }
                 return
@@ -527,12 +804,12 @@ final class IslandController: NSObject, IslandActions {
             guard let self, self.model.state != .collapsed else { return }
             let rect = self.model.metrics.screenRect(for: self.model.state).insetBy(dx: -6, dy: -6)
             // Get out of the way as soon as the file leaves the island.
-            if !rect.contains(point) { self.setState(.collapsed) }
+            if !rect.contains(point) { self.setState(self.restState) }
         }
         source.onEnd = { [weak self] _ in
             guard let self else { return }
             self.model.isDraggingFile = false
-            if self.model.state == .collapsed {
+            if self.model.state == .collapsed || self.model.state == .activity {
                 self.panel.ignoresMouseEvents = true
                 self.waitsForPointerToLeave = self.model.metrics.hotZone.contains(NSEvent.mouseLocation)
             } else {
@@ -608,10 +885,10 @@ final class IslandController: NSObject, IslandActions {
         openWith.submenu = submenu
         menu.addItem(openWith)
 
-        if Archive.canExtract(item) {
-            let extract = menuItem("Extract & Move Archive to Trash", symbol: "archivebox", action: #selector(menuExtract(_:)))
-            extract.representedObject = item.id
-            menu.addItem(extract)
+        if let action = SmartAction.available(for: item) {
+            let entry = menuItem(action.menuTitle, symbol: action == .extract ? "archivebox" : "arrow.down.app", action: #selector(menuSmartAction(_:)))
+            entry.representedObject = item.id
+            menu.addItem(entry)
         }
         menu.addItem(menuItem("Show in Finder", symbol: "folder", action: #selector(menuReveal(_:)), file: item.url))
         menu.addItem(menuItem("Quick Look", symbol: "eye", action: #selector(menuQuickLook(_:)), file: item.url))
@@ -627,16 +904,19 @@ final class IslandController: NSObject, IslandActions {
         let menu = NSMenu()
 
         menu.addItem(.sectionHeader(title: "Folders"))
-        for (index, page) in model.pages.enumerated() {
+        for (index, page) in model.pages.enumerated() where page.kind == .folder {
             let item = menuItem(page.name, action: #selector(menuSelectPage(_:)))
             item.representedObject = index
             item.state = index == model.pageIndex ? .on : .off
             menu.addItem(item)
         }
         menu.addItem(menuItem("Add Folder…", symbol: "plus", action: #selector(menuAddFolder)))
-        if model.pages.count > 1 {
+        if model.currentPage?.kind == .folder, model.pages.filter({ $0.kind == .folder }).count > 1 {
             menu.addItem(menuItem("Remove “\(model.folderName)”", symbol: "minus", action: #selector(menuRemoveFolder)))
         }
+        let deck = menuItem("Shortcuts Page", action: #selector(menuToggleShortcutsPage))
+        deck.state = Preferences.showsShortcutsPage ? .on : .off
+        menu.addItem(deck)
         menu.addItem(.separator())
 
         let preview = menuItem("Preview New Files", action: #selector(menuTogglePreview))
@@ -694,10 +974,11 @@ final class IslandController: NSObject, IslandActions {
         FileActions.open(pair[0], with: pair[1])
     }
 
-    @objc private func menuExtract(_ sender: NSMenuItem) {
+    @objc private func menuSmartAction(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String,
-              let item = model.items.first(where: { $0.id == id }) else { return }
-        extract(item)
+              let item = model.items.first(where: { $0.id == id }),
+              let action = SmartAction.available(for: item) else { return }
+        perform(action, on: item)
     }
 
     @objc private func menuReveal(_ sender: NSMenuItem) {
@@ -752,12 +1033,18 @@ final class IslandController: NSObject, IslandActions {
     }
 
     @objc private func menuRemoveFolder() {
-        guard model.pages.count > 1, let page = model.currentPage else { return }
+        guard let page = model.currentPage, page.kind == .folder,
+              model.pages.filter({ $0.kind == .folder }).count > 1 else { return }
         Preferences.folders = Preferences.folders.filter { $0.path != page.id }
         withAnimation(.spring(response: 0.44, dampingFraction: 0.82)) {
             model.pageEdge = .top
             reloadFolders()
         }
+    }
+
+    @objc private func menuToggleShortcutsPage() {
+        Preferences.showsShortcutsPage.toggle()
+        withAnimation(.spring(response: 0.44, dampingFraction: 0.82)) { reloadFolders() }
     }
 
     @objc private func menuToggleHaptics() {
@@ -781,6 +1068,10 @@ final class IslandController: NSObject, IslandActions {
 
     #if DEBUG
     /// `QF_DEBUG_STATE=expanded|peek` pins the island open for screenshots.
+    /// With `expanded`: `QF_DEBUG_PAGE=n` opens page n, `QF_DEBUG_ACTIONS`
+    /// runs every smart action, `QF_DEBUG_RUNKEY=n` presses deck key n,
+    /// `QF_DEBUG_EDITOR` opens the key editor, `QF_DEBUG_CONFIRM` shows the
+    /// cleanup confirmation, `QF_DEBUG_MENU` opens the options menu.
     private func applyDebugState() {
         guard let value = ProcessInfo.processInfo.environment["QF_DEBUG_STATE"] else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
@@ -796,9 +1087,21 @@ final class IslandController: NSObject, IslandActions {
                 if let page = ProcessInfo.processInfo.environment["QF_DEBUG_PAGE"].flatMap(Int.init) {
                     selectPage(page)
                 }
-                if ProcessInfo.processInfo.environment["QF_DEBUG_EXTRACT"] != nil {
+                let env = ProcessInfo.processInfo.environment
+                if let index = env["QF_DEBUG_RUNKEY"].flatMap(Int.init), self.model.deckKeys.indices.contains(index) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.run(self.model.deckKeys[index]) }
+                }
+                if env["QF_DEBUG_EDITOR"] != nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.editKey(self.model.deckKeys.first) }
+                }
+                if env["QF_DEBUG_CONFIRM"] != nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.model.isConfirmingCleanup = true }
+                }
+                if ProcessInfo.processInfo.environment["QF_DEBUG_ACTIONS"] != nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        self.model.items.filter(Archive.canExtract).forEach(self.extract)
+                        for item in self.model.items {
+                            if let action = SmartAction.available(for: item) { self.perform(action, on: item) }
+                        }
                     }
                 }
                 if ProcessInfo.processInfo.environment["QF_DEBUG_MENU"] != nil {

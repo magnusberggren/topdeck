@@ -30,6 +30,8 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>QuickFolder asks Finder to open your downloads in column view.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>QuickFolder opens downloaded disk images to install the app inside.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>QuickFolder shows your latest downloads when you point at the notch.</string>
 	<key>NSHighResolutionCapable</key>

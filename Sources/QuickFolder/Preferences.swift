@@ -8,12 +8,17 @@ enum Preferences {
         static let showsNewDownloadPreview = "showsNewDownloadPreview"
         static let folderPaths = "folderPaths"
         static let hapticsEnabled = "hapticsEnabled"
+        static let showsShortcutsPage = "showsShortcutsPage"
         static let hasLaunchedBefore = "hasLaunchedBefore"
         static let hasSetUpLoginItem = "hasSetUpLoginItem"
     }
 
     static func registerDefaults() {
-        defaults.register(defaults: [Key.showsNewDownloadPreview: true, Key.hapticsEnabled: true])
+        defaults.register(defaults: [
+            Key.showsNewDownloadPreview: true,
+            Key.hapticsEnabled: true,
+            Key.showsShortcutsPage: true,
+        ])
     }
 
     static var showsNewDownloadPreview: Bool {
@@ -24,6 +29,11 @@ enum Preferences {
     static var hapticsEnabled: Bool {
         get { defaults.bool(forKey: Key.hapticsEnabled) }
         set { defaults.set(newValue, forKey: Key.hapticsEnabled) }
+    }
+
+    static var showsShortcutsPage: Bool {
+        get { defaults.bool(forKey: Key.showsShortcutsPage) }
+        set { defaults.set(newValue, forKey: Key.showsShortcutsPage) }
     }
 
     static var hasLaunchedBefore: Bool {

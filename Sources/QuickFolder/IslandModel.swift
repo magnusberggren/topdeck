@@ -4,8 +4,36 @@ import SwiftUI
 
 enum IslandState: Equatable {
     case collapsed
+    /// The notch grows small wings to show downloads and installs in progress.
+    case activity
     case peek
     case expanded
+}
+
+/// Something in progress, shown in the notch's wings and as a tile.
+struct Activity: Identifiable, Equatable {
+    enum Kind { case download, extract, install }
+
+    let id: String
+    var name: String
+    /// nil while the total isn't known yet.
+    var fraction: Double?
+    var kind: Kind
+    var folderPath: String
+}
+
+/// Old installers that are safe to clear out of a folder.
+struct Cleanup: Equatable {
+    var files: [URL]
+    var bytes: Int64
+}
+
+/// A short message that replaces the header title for a few seconds.
+struct Toast: Equatable {
+    var symbol: String
+    var text: String
+    /// Clicking the toast opens this.
+    var url: URL?
 }
 
 enum PeekContent: Equatable {
@@ -18,6 +46,10 @@ enum PeekContent: Equatable {
 enum HoverTarget: Hashable {
     case tile(String)
     case tileAction(String)
+    case deckKey(UUID)
+    case addDeckKey
+    case cleanup
+    case toast
     case peek
     case openFolder
     case settings
@@ -31,18 +63,45 @@ protocol IslandActions: AnyObject {
     func showSettingsMenu()
     func openPrivacySettings()
     func selectPage(_ index: Int)
-    func extract(_ item: DownloadItem)
+    func perform(_ action: SmartAction, on item: DownloadItem)
+    func cleanUp()
+    func openToast()
+    func run(_ key: DeckKey)
+    func editKey(_ key: DeckKey?)
+    func showMenu(for key: DeckKey)
 }
 
-/// One folder the island can show. The island pages through these vertically.
+/// One page of the island: a folder, or the Shortcuts deck. The island pages
+/// through these vertically.
 struct FolderPage: Identifiable, Equatable {
+    enum Kind { case folder, shortcuts }
+
+    let id: String
     let url: URL
+    var kind: Kind = .folder
     var name: String
     var items: [DownloadItem] = []
     var access: FolderAccess = .ok
+    var cleanup: Cleanup?
 
-    var id: String { url.path }
-    var isDownloads: Bool { url.standardizedFileURL == Preferences.downloadsFolder.standardizedFileURL }
+    init(url: URL, name: String) {
+        id = url.path
+        self.url = url
+        self.name = name
+    }
+
+    private init(shortcuts: Void) {
+        id = "shortcuts"
+        url = URL(fileURLWithPath: NSHomeDirectory())
+        kind = .shortcuts
+        name = "Shortcuts"
+    }
+
+    static let shortcuts = FolderPage(shortcuts: ())
+
+    var isDownloads: Bool {
+        kind == .folder && url.standardizedFileURL == Preferences.downloadsFolder.standardizedFileURL
+    }
 }
 
 /// The size of the black shape for one state. `bodySize` excludes the
@@ -65,7 +124,9 @@ struct IslandMetrics: Equatable {
     static let tileWidth: CGFloat = 84
     static let tileHeight: CGFloat = 116
     static let tileSpacing: CGFloat = 4
-    static let visibleTiles: CGFloat = 6
+    static let visibleTiles: CGFloat = 7
+    /// Width of each wing beside the notch while something is in progress.
+    static let activityWing: CGFloat = 50
     static let rowInset: CGFloat = 14
     static let shadowPadding: CGFloat = 80
 
@@ -82,6 +143,10 @@ struct IslandMetrics: Equatable {
         )
     }
 
+    var activityBody: CGSize {
+        CGSize(width: notchRect.width + Self.activityWing * 2, height: notchHeight)
+    }
+
     var peekBody: CGSize {
         CGSize(width: max(notchRect.width + 170, 360), height: notchHeight + 54)
     }
@@ -94,6 +159,8 @@ struct IslandMetrics: Equatable {
                 ? CGSize(width: notchRect.width - 4, height: notchRect.height - 1)
                 : notchRect.size
             return IslandShape(bodySize: size, earRadius: hasNotch ? 0 : 5, bottomRadius: hasNotch ? 8 : 9)
+        case .activity:
+            return IslandShape(bodySize: activityBody, earRadius: 6, bottomRadius: 12)
         case .peek:
             return IslandShape(bodySize: peekBody, earRadius: 10, bottomRadius: 22)
         case .expanded:
@@ -184,6 +251,15 @@ final class IslandModel {
     /// Short messages shown in place of a tile's date, like "Couldn't extract".
     var tileNotes: [String: String] = [:]
 
+    var activities: [Activity] = []
+    var toast: Toast?
+    /// The cleanup pill asks "Trash 12 old installers?" before doing it.
+    var isConfirmingCleanup = false
+
+    var deckKeys: [DeckKey] = []
+    /// Briefly true or false after a key runs, for the checkmark or cross.
+    var deckResults: [UUID: Bool] = [:]
+
     let thumbnails = ThumbnailStore()
     @ObservationIgnored weak var actions: IslandActions?
 
@@ -196,8 +272,19 @@ final class IslandModel {
     var access: FolderAccess { currentPage?.access ?? .ok }
     var folderName: String { currentPage?.name ?? "" }
 
+    /// Downloads in progress that belong on the current page.
+    var pageDownloads: [Activity] {
+        guard let page = currentPage, page.kind == .folder else { return [] }
+        return activities.filter { $0.kind == .download && $0.folderPath == page.url.path }
+    }
+
+    /// How many tiles the current page's row holds.
+    var tileCount: Int {
+        currentPage?.kind == .shortcuts ? deckKeys.count + 1 : pageDownloads.count + items.count
+    }
+
     var maxScrollOffset: CGFloat {
-        let count = CGFloat(items.count)
+        let count = CGFloat(tileCount)
         let content = count * IslandMetrics.tileWidth + max(0, count - 1) * IslandMetrics.tileSpacing
         return max(0, content - metrics.rowWidth)
     }
