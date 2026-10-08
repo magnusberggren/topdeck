@@ -155,7 +155,7 @@ final class CalendarStore {
         for calendar in calendars {
             let account = calendar.source?.title ?? "Other"
             groups[account, default: []].append(CalendarChoice(
-                id: calendar.calendarIdentifier,
+                id: Self.portableID(of: calendar),
                 title: calendar.title,
                 account: account,
                 isIncluded: Self.isIncluded(calendar, overrides: overrides),
@@ -227,7 +227,7 @@ final class CalendarStore {
     /// colleagues have no owner identity, and holding their meetings would
     /// fill the page with calls you aren't in.
     private static func isIncluded(_ calendar: EKCalendar, overrides: [String: Bool]) -> Bool {
-        if let choice = overrides[calendar.calendarIdentifier] { return choice }
+        if let choice = overrides[portableID(of: calendar)] ?? overrides[calendar.calendarIdentifier] { return choice }
         switch calendar.type {
         case .birthday, .subscription: return false
         default: break
@@ -235,6 +235,12 @@ final class CalendarStore {
         let key = "ownerIdentityEmail"
         guard calendar.responds(to: NSSelectorFromString(key)) else { return true }
         return (calendar.value(forKey: key) as? String)?.isEmpty == false
+    }
+
+    /// Names a calendar the same way on every Mac, unlike its identifier,
+    /// so hiding it here hides it on your other Macs too.
+    static func portableID(of calendar: EKCalendar) -> String {
+        (account(of: calendar) ?? calendar.source?.title ?? "") + "|" + calendar.title
     }
 
     /// The account the calendar belongs to, like "you@work.example".

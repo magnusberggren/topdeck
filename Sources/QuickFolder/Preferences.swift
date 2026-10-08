@@ -17,8 +17,7 @@ enum Preferences {
         static let updatesAutomatically = "updatesAutomatically"
         static let calendarOverrides = "calendarOverrides"
         static let displayID = "displayID"
-        static let syncsShortcuts = "syncsShortcuts"
-        static let lastShortcutsSync = "lastShortcutsSync"
+        static let syncsWithiCloud = "syncsWithiCloud"
     }
 
     static func registerDefaults() {
@@ -29,6 +28,7 @@ enum Preferences {
             Key.showsMeetingsPage: true,
             Key.remindsOfMeetings: true,
             Key.updatesAutomatically: true,
+            Key.syncsWithiCloud: true,
         ])
     }
 
@@ -78,15 +78,10 @@ enum Preferences {
         set { defaults.set(newValue, forKey: Key.displayID) }
     }
 
-    static var syncsShortcuts: Bool {
-        get { defaults.bool(forKey: Key.syncsShortcuts) }
-        set { defaults.set(newValue, forKey: Key.syncsShortcuts) }
-    }
-
-    /// When this Mac last wrote or read the shared shortcuts file.
-    static var lastShortcutsSync: Date? {
-        get { defaults.object(forKey: Key.lastShortcutsSync) as? Date }
-        set { defaults.set(newValue, forKey: Key.lastShortcutsSync) }
+    /// Shortcuts and settings follow the Apple ID, through iCloud Drive.
+    static var syncsWithiCloud: Bool {
+        get { defaults.bool(forKey: Key.syncsWithiCloud) && CloudSync.isAvailable }
+        set { defaults.set(newValue, forKey: Key.syncsWithiCloud) }
     }
 
     /// Page ids (folder paths and "shortcuts") from top to bottom, as the user
@@ -165,5 +160,58 @@ enum LoginItem {
             }
             refresh()
         }
+    }
+}
+
+/// The settings that make up "your setup", the same on every Mac. Which
+/// display the island uses stays per Mac, since every Mac has different ones.
+struct SyncedSettings: Codable, Equatable {
+    /// Paths under the home folder are stored as "~/Downloads", since the
+    /// home folder can be named differently on another Mac.
+    var folders: [String]
+    var pageOrder: [String]
+    var showsShortcutsPage: Bool
+    var showsMeetingsPage: Bool
+    var showsNewDownloadPreview: Bool
+    var hapticsEnabled: Bool
+    var remindsOfMeetings: Bool
+    var updatesAutomatically: Bool
+    var calendarOverrides: [String: Bool]
+
+    static func current() -> SyncedSettings {
+        SyncedSettings(
+            folders: Preferences.folders.map { portable($0.path) },
+            pageOrder: Preferences.pageOrder.map(portable),
+            showsShortcutsPage: Preferences.showsShortcutsPage,
+            showsMeetingsPage: Preferences.showsMeetingsPage,
+            showsNewDownloadPreview: Preferences.showsNewDownloadPreview,
+            hapticsEnabled: Preferences.hapticsEnabled,
+            remindsOfMeetings: Preferences.remindsOfMeetings,
+            updatesAutomatically: Preferences.updatesAutomatically,
+            // Only calendars that can be recognized on another Mac.
+            calendarOverrides: Preferences.calendarOverrides.filter { $0.key.contains("|") }
+        )
+    }
+
+    func apply() {
+        Preferences.folders = folders.map { URL(fileURLWithPath: Self.local($0), isDirectory: true) }
+        Preferences.pageOrder = pageOrder.map(Self.local)
+        Preferences.showsShortcutsPage = showsShortcutsPage
+        Preferences.showsMeetingsPage = showsMeetingsPage
+        Preferences.showsNewDownloadPreview = showsNewDownloadPreview
+        Preferences.hapticsEnabled = hapticsEnabled
+        Preferences.remindsOfMeetings = remindsOfMeetings
+        Preferences.updatesAutomatically = updatesAutomatically
+        Preferences.calendarOverrides = calendarOverrides
+    }
+
+    private static func portable(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        if path == home { return "~" }
+        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+    }
+
+    private static func local(_ path: String) -> String {
+        path == "~" || path.hasPrefix("~/") ? NSHomeDirectory() + path.dropFirst() : path
     }
 }
