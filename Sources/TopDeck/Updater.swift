@@ -53,6 +53,14 @@ final class Updater {
     func start() {
         // Updating only makes sense for an installed .app, not `swift run`.
         guard Bundle.main.bundleURL.pathExtension == "app", Preferences.updatesAutomatically else { return }
+        // Builds from source (debug, or not signed by us) would otherwise be
+        // swapped for the official release while someone is working on them.
+        #if DEBUG
+        let isOfficialBuild = ProcessInfo.processInfo.environment["QF_DEBUG_RELEASE"] != nil
+        #else
+        let isOfficialBuild = Self.isTrusted(Bundle.main.bundleURL)
+        #endif
+        guard isOfficialBuild else { return }
         var delay: TimeInterval = 20
         #if DEBUG
         if ProcessInfo.processInfo.environment["QF_DEBUG_RELEASE"] != nil { delay = 3 }
@@ -300,5 +308,29 @@ final class Updater {
             case name
             case browserDownloadURL = "browser_download_url"
         }
+    }
+}
+
+/// Where TopDeck lives on GitHub.
+enum Project {
+    static let repository = URL(string: "https://github.com/magnusberggren/topdeck")!
+
+    static func newIssue(details: [String]) -> URL {
+        let body = """
+        **What happened?**
+
+
+        **What did you expect instead?**
+
+
+        **Steps to make it happen again**
+        1.
+
+        ---
+        \(details.joined(separator: " · "))
+        """
+        var components = URLComponents(url: repository.appendingPathComponent("issues/new"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "labels", value: "bug"), URLQueryItem(name: "body", value: body)]
+        return components.url ?? repository
     }
 }
