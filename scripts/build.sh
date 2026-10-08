@@ -25,5 +25,5 @@ if [ -z "${SIGN_IDENTITY:-}" ]; then
     | sed -E 's/.*"(.*)"/\1/')"
   SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 fi
-codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP" >/dev/null
+codesign --force --options runtime --entitlements Resources/QuickFolder.entitlements --sign "$SIGN_IDENTITY" "$APP" >/dev/null
 echo "Built $APP (signed with: $SIGN_IDENTITY)"

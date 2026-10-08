@@ -32,6 +32,10 @@
 	<string>QuickFolder asks Finder to open your downloads in column view.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
 	<string>QuickFolder opens downloaded disk images to install the app inside.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>QuickFolder shows your upcoming video calls so you can join them as the right account.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>QuickFolder shows your upcoming video calls so you can join them as the right account.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>QuickFolder shows your latest downloads when you point at the notch.</string>
 	<key>NSHighResolutionCapable</key>

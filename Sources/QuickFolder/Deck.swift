@@ -71,6 +71,9 @@ enum DeckStore {
         return keys
     }
 
+    /// False until the user changes anything, while the deck is still the examples.
+    static var hasSavedKeys: Bool { UserDefaults.standard.data(forKey: key) != nil }
+
     static func save(_ keys: [DeckKey]) {
         if let data = try? JSONEncoder().encode(keys) {
             UserDefaults.standard.set(data, forKey: key)

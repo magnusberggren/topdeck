@@ -103,13 +103,39 @@ private struct PageContent: View {
 
     var body: some View {
         Group {
-            if model.currentPage?.kind == .shortcuts {
-                DeckView(model: model)
-            } else {
-                folderContent
+            switch model.currentPage?.kind {
+            case .shortcuts: DeckView(model: model)
+            case .meetings: meetingsContent
+            default: folderContent
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var meetingsContent: some View {
+        switch model.calendarAccess {
+        case .notDetermined:
+            CalendarAccessView(
+                model: model,
+                title: "Join your video calls from here",
+                detail: "Meetings from every account in Calendar, opened as the right Google account.",
+                button: "Allow Calendar Access"
+            )
+        case .denied:
+            CalendarAccessView(
+                model: model,
+                title: "QuickFolder can’t see your calendars",
+                detail: "Allow access in Privacy & Security › Calendars.",
+                button: "Open System Settings"
+            )
+        case .granted:
+            if model.meetings.isEmpty {
+                PlaceholderView(symbol: "video.slash", text: "No video calls in the next 7 days")
+            } else {
+                MeetingsView(model: model)
+            }
+        }
     }
 
     @ViewBuilder
@@ -273,6 +299,8 @@ private struct ArrangeRow: View {
     private var icon: some View {
         if page.kind == .shortcuts {
             DeckKeyFace(symbol: "square.grid.2x2.fill", color: .purple, size: height * 0.68)
+        } else if page.kind == .meetings {
+            DeckKeyFace(symbol: "video.fill", color: .green, size: height * 0.68)
         } else {
             Image(nsImage: NSWorkspace.shared.icon(forFile: page.url.path))
                 .resizable()
@@ -334,6 +362,10 @@ private struct HeaderView: View {
             if page?.kind == .shortcuts {
                 HeaderButton(model: model, target: .addDeckKey, symbol: "plus", label: "Add Shortcut") {
                     model.actions?.editKey(nil)
+                }
+            } else if page?.kind == .meetings {
+                HeaderButton(model: model, target: .openFolder, symbol: "calendar", label: "Open Calendar") {
+                    model.actions?.openCalendar()
                 }
             } else {
                 HeaderButton(model: model, target: .openFolder, symbol: "folder", label: "Open in Finder") {
@@ -992,6 +1024,168 @@ private struct AddKeyTile: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.62), value: isHovered)
         .animation(.spring(response: 0.18, dampingFraction: 0.55), value: isPressed)
         .accessibilityLabel("Add Shortcut")
+    }
+}
+
+// MARK: - Meetings
+
+private struct MeetingsView: View {
+    let model: IslandModel
+
+    var body: some View {
+        let width = model.metrics.rowWidth
+        let offset = model.scrollOffset
+        let maxOffset = model.maxScrollOffset
+
+        TimelineView(.everyMinute) { context in
+            HStack(spacing: IslandMetrics.tileSpacing) {
+                ForEach(model.meetings) { meeting in
+                    MeetingTile(meeting: meeting, model: model, now: context.date)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
+            }
+            .fixedSize()
+            .offset(x: -offset)
+            .frame(width: width, alignment: .leading)
+        }
+        .frame(width: width, height: IslandMetrics.tileHeight, alignment: .leading)
+        .clipped()
+        .mask {
+            HStack(spacing: 0) {
+                LinearGradient(colors: [offset > 1 ? .clear : .black, .black], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 28)
+                Rectangle()
+                LinearGradient(colors: [.black, offset < maxOffset - 1 ? .clear : .black], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 28)
+            }
+        }
+        .padding(.bottom, 4)
+    }
+}
+
+private struct MeetingTile: View {
+    let meeting: Meeting
+    let model: IslandModel
+    let now: Date
+
+    private static let green = Color(red: 0.2, green: 0.78, blue: 0.35)
+
+    var body: some View {
+        let target = HoverTarget.meeting(meeting.id)
+        let isHovered = model.hovered == target
+        let isPressed = model.pressed == target
+        let isLive = meeting.isLive(at: now)
+        let isSoon = meeting.isSoon(at: now)
+
+        VStack(spacing: 0) {
+            DeckKeyFace(symbol: "video.fill", color: meeting.color, size: 52)
+                .overlay(alignment: .topTrailing) {
+                    if isLive {
+                        Text("LIVE")
+                            .font(.system(size: 8, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1.5)
+                            .background(Capsule().fill(Color.red))
+                            .offset(x: 6, y: -4)
+                    }
+                }
+                .shadow(color: (isSoon ? Self.green : meeting.color.base).opacity(isHovered || isSoon ? 0.55 : 0), radius: 10, y: 2)
+                .scaleEffect(isPressed ? 0.88 : (isHovered ? 1.07 : 1))
+                .frame(width: 70, height: 54)
+                .padding(.bottom, 8)
+
+            Text(meeting.title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.92))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(height: 28, alignment: .top)
+
+            Text(isHovered ? joinLabel : Self.timeLabel(for: meeting, now: now))
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(isSoon && !isHovered ? Self.green : .white.opacity(isHovered ? 0.75 : 0.42))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.top, 1)
+                .contentTransition(.opacity)
+                .animation(.smooth(duration: 0.18), value: isHovered)
+        }
+        .padding(.top, 10)
+        .padding(.horizontal, 4)
+        .frame(width: IslandMetrics.tileWidth, height: IslandMetrics.tileHeight, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.white.opacity(isHovered ? 0.08 : 0))
+        )
+        .overlay {
+            if model.state == .expanded {
+                MouseInteraction(
+                    target: target,
+                    model: model,
+                    onClick: { model.actions?.join(meeting, as: meeting.account) },
+                    onRightClick: { model.actions?.showMenu(for: meeting) }
+                )
+            }
+        }
+        .help(meeting.account.map { "Join as \($0)" } ?? "Join")
+        .animation(.spring(response: 0.3, dampingFraction: 0.62), value: isHovered)
+        .animation(.spring(response: 0.18, dampingFraction: 0.55), value: isPressed)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(meeting.title), \(Self.timeLabel(for: meeting, now: now))")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Which account it opens as, since that's the whole point.
+    private var joinLabel: String {
+        meeting.account.map { "Join · " + Meeting.shortAccount($0) } ?? "Join"
+    }
+
+    static func timeLabel(for meeting: Meeting, now: Date) -> String {
+        if meeting.isLive(at: now) { return "Now" }
+        let minutes = Int(meeting.start.timeIntervalSince(now) / 60)
+        if minutes < 1 { return "Starting" }
+        if minutes < 60 { return "In \(minutes) min" }
+        let time = meeting.start.formatted(date: .omitted, time: .shortened)
+        let calendar = Calendar.current
+        if calendar.isDateInToday(meeting.start) { return time }
+        if calendar.isDateInTomorrow(meeting.start) { return "Tomorrow \(time)" }
+        return meeting.start.formatted(.dateTime.weekday(.abbreviated)) + " " + time
+    }
+}
+
+private struct CalendarAccessView: View {
+    let model: IslandModel
+    let title: String
+    let detail: String
+    let button: String
+
+    var body: some View {
+        let isHovered = model.hovered == .calendarAccess
+        VStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+            Text(detail)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.5))
+            Text(button)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(.white.opacity(isHovered ? 0.24 : 0.16)))
+                .overlay {
+                    if model.state == .expanded {
+                        MouseInteraction(target: .calendarAccess, model: model) {
+                            model.actions?.requestCalendarAccess()
+                        }
+                    }
+                }
+                .padding(.top, 6)
+                .animation(.smooth(duration: 0.18), value: isHovered)
+        }
+        .padding(.bottom, 8)
     }
 }
 

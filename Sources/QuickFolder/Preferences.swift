@@ -12,6 +12,11 @@ enum Preferences {
         static let pageOrder = "pageOrder"
         static let hasLaunchedBefore = "hasLaunchedBefore"
         static let hasSetUpLoginItem = "hasSetUpLoginItem"
+        static let showsMeetingsPage = "showsMeetingsPage"
+        static let calendarOverrides = "calendarOverrides"
+        static let displayID = "displayID"
+        static let syncsShortcuts = "syncsShortcuts"
+        static let lastShortcutsSync = "lastShortcutsSync"
     }
 
     static func registerDefaults() {
@@ -19,6 +24,7 @@ enum Preferences {
             Key.showsNewDownloadPreview: true,
             Key.hapticsEnabled: true,
             Key.showsShortcutsPage: true,
+            Key.showsMeetingsPage: true,
         ])
     }
 
@@ -35,6 +41,36 @@ enum Preferences {
     static var showsShortcutsPage: Bool {
         get { defaults.bool(forKey: Key.showsShortcutsPage) }
         set { defaults.set(newValue, forKey: Key.showsShortcutsPage) }
+    }
+
+    static var showsMeetingsPage: Bool {
+        get { defaults.bool(forKey: Key.showsMeetingsPage) }
+        set { defaults.set(newValue, forKey: Key.showsMeetingsPage) }
+    }
+
+    /// Calendars the user showed or hid on the Meetings page, by calendar id.
+    /// The rest follow the default: your own calendars on, shared ones off.
+    static var calendarOverrides: [String: Bool] {
+        get { defaults.dictionary(forKey: Key.calendarOverrides) as? [String: Bool] ?? [:] }
+        set { defaults.set(newValue, forKey: Key.calendarOverrides) }
+    }
+
+    /// The display the island lives on, by its UUID. nil picks the built-in
+    /// display with a notch, or the main display if none has one.
+    static var displayID: String? {
+        get { defaults.string(forKey: Key.displayID) }
+        set { defaults.set(newValue, forKey: Key.displayID) }
+    }
+
+    static var syncsShortcuts: Bool {
+        get { defaults.bool(forKey: Key.syncsShortcuts) }
+        set { defaults.set(newValue, forKey: Key.syncsShortcuts) }
+    }
+
+    /// When this Mac last wrote or read the shared shortcuts file.
+    static var lastShortcutsSync: Date? {
+        get { defaults.object(forKey: Key.lastShortcutsSync) as? Date }
+        set { defaults.set(newValue, forKey: Key.lastShortcutsSync) }
     }
 
     /// Page ids (folder paths and "shortcuts") from top to bottom, as the user

@@ -59,6 +59,8 @@ enum HoverTarget: Hashable {
     case openFolder
     case settings
     case accessButton
+    case meeting(String)
+    case calendarAccess
 }
 
 protocol IslandActions: AnyObject {
@@ -76,12 +78,16 @@ protocol IslandActions: AnyObject {
     func showMenu(for key: DeckKey)
     func setArranging(_ arranging: Bool)
     func dragRow(_ id: String, phase: PanPhase, translation: CGFloat)
+    func join(_ meeting: Meeting, as account: String?)
+    func showMenu(for meeting: Meeting)
+    func requestCalendarAccess()
+    func openCalendar()
 }
 
-/// One page of the island: a folder, or the Shortcuts deck. The island pages
-/// through these vertically.
+/// One page of the island: a folder, the Shortcuts deck, or upcoming
+/// meetings. The island pages through these vertically.
 struct FolderPage: Identifiable, Equatable {
-    enum Kind { case folder, shortcuts }
+    enum Kind { case folder, shortcuts, meetings }
 
     let id: String
     let url: URL
@@ -105,6 +111,15 @@ struct FolderPage: Identifiable, Equatable {
     }
 
     static let shortcuts = FolderPage(shortcuts: ())
+
+    private init(meetings: Void) {
+        id = "meetings"
+        url = URL(fileURLWithPath: NSHomeDirectory())
+        kind = .meetings
+        name = "Meetings"
+    }
+
+    static let meetings = FolderPage(meetings: ())
 
     var isDownloads: Bool {
         kind == .folder && url.standardizedFileURL == Preferences.downloadsFolder.standardizedFileURL
@@ -202,8 +217,13 @@ struct IslandMetrics: Equatable {
         CGRect(x: notchRect.minX - 8, y: notchRect.minY, width: notchRect.width + 16, height: notchRect.height + 1)
     }
 
+    /// The display picked in Options › Show On, else the one with a notch,
+    /// else the main display. Screens without a notch get a drawn one.
     static func preferredScreen() -> NSScreen? {
-        NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.screens.first
+        if let id = Preferences.displayID, let chosen = NSScreen.screens.first(where: { $0.displayUUID == id }) {
+            return chosen
+        }
+        return NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.screens.first
     }
 
     /// Used only if no screen is attached at launch; replaced on the next screen change.
@@ -224,7 +244,13 @@ struct IslandMetrics: Equatable {
         let frame = screen.frame
         screenFrame = frame
 
-        if screen.safeAreaInsets.top > 0,
+        var hasHardwareNotch = screen.safeAreaInsets.top > 0
+        #if DEBUG
+        // QF_DEBUG_FAKE_NOTCH draws the island as on a display without a notch.
+        if ProcessInfo.processInfo.environment["QF_DEBUG_FAKE_NOTCH"] != nil { hasHardwareNotch = false }
+        #endif
+
+        if hasHardwareNotch,
            let left = screen.auxiliaryTopLeftArea,
            let right = screen.auxiliaryTopRightArea {
             let height = screen.safeAreaInsets.top
@@ -285,6 +311,9 @@ final class IslandModel {
     /// Briefly true or false after a key runs, for the checkmark or cross.
     var deckResults: [UUID: Bool] = [:]
 
+    var meetings: [Meeting] = []
+    var calendarAccess: CalendarAccess = .notDetermined
+
     let thumbnails = ThumbnailStore()
     @ObservationIgnored weak var actions: IslandActions?
 
@@ -319,12 +348,25 @@ final class IslandModel {
 
     /// How many tiles the current page's row holds.
     var tileCount: Int {
-        currentPage?.kind == .shortcuts ? deckKeys.count + 1 : pageDownloads.count + items.count
+        switch currentPage?.kind {
+        case .shortcuts: deckKeys.count + 1
+        case .meetings: calendarAccess == .granted ? meetings.count : 0
+        default: pageDownloads.count + items.count
+        }
     }
 
     var maxScrollOffset: CGFloat {
         let count = CGFloat(tileCount)
         let content = count * IslandMetrics.tileWidth + max(0, count - 1) * IslandMetrics.tileSpacing
         return max(0, content - metrics.rowWidth)
+    }
+}
+
+extension NSScreen {
+    /// Stays the same across restarts and reconnects, unlike the display number.
+    var displayUUID: String? {
+        guard let number = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+              let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue() else { return nil }
+        return CFUUIDCreateString(nil, uuid) as String
     }
 }

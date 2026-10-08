@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Owns the island window and decides when it opens, peeks and closes.
 final class IslandController: NSObject, IslandActions {
@@ -54,6 +55,8 @@ final class IslandController: NSObject, IslandActions {
     private var tasks: [Activity] = []
 
     private let deckEditor = DeckEditor()
+    private let deckSync = DeckSync()
+    private let calendar = CalendarStore()
     private var toastTimer: Timer?
     private var cleanupConfirmTimer: Timer?
 
@@ -95,6 +98,27 @@ final class IslandController: NSObject, IslandActions {
         panel.orderFrontRegardless()
 
         model.deckKeys = DeckStore.load()
+        deckSync.onRemoteChange = { [weak self] keys in
+            guard let self, keys != self.model.deckKeys else { return }
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { self.model.deckKeys = keys }
+            DeckStore.save(keys)
+        }
+        if Preferences.syncsShortcuts { startDeckSync() }
+
+        model.calendarAccess = calendar.access
+        calendar.onAccessChange = { [weak self] access in
+            self?.model.calendarAccess = access
+            // QuickFolder came forward for the permission prompt; hand focus back.
+            if NSApp.isActive && NSApp.keyWindow == nil && NSApp.modalWindow == nil { NSApp.deactivate() }
+        }
+        calendar.onChange = { [weak self] meetings in
+            guard let self, meetings != self.model.meetings else { return }
+            let isVisible = self.model.state == .expanded && self.model.currentPage?.kind == .meetings
+            withAnimation(isVisible ? .spring(response: 0.42, dampingFraction: 0.84) : nil) {
+                self.model.meetings = meetings
+            }
+        }
+        calendar.refresh()
         progressWatcher.onChange = { [weak self] downloads in
             self?.reportedDownloads = downloads
             self?.rebuildActivities()
@@ -140,6 +164,7 @@ final class IslandController: NSObject, IslandActions {
                 ?? FolderPage(url: url, name: FileManager.default.displayName(atPath: url.path))
         }
         if Preferences.showsShortcutsPage { pages.append(.shortcuts) }
+        if Preferences.showsMeetingsPage { pages.append(.meetings) }
         // The user's arrangement first; anything new keeps its natural place after.
         let order = Preferences.pageOrder
         pages = pages.enumerated()
@@ -470,17 +495,113 @@ final class IslandController: NSObject, IslandActions {
             } else {
                 self.model.deckKeys.append(saved)
             }
-            DeckStore.save(self.model.deckKeys)
+            self.saveDeck()
         }, onDelete: { [weak self] deleted in
             self?.deleteKey(deleted.id)
         })
+    }
+
+    private func saveDeck() {
+        DeckStore.save(model.deckKeys)
+        if Preferences.syncsShortcuts { deckSync.save(model.deckKeys) }
+    }
+
+    private func startDeckSync() {
+        deckSync.start(local: model.deckKeys, hasLocalKeys: DeckStore.hasSavedKeys)
+    }
+
+    // MARK: - Meetings
+
+    func join(_ meeting: Meeting, as account: String?) {
+        Haptics.perform(.generic)
+        collapse(waitForPointerToLeave: true)
+        NSWorkspace.shared.open(meeting.joinURL(as: account))
+    }
+
+    func requestCalendarAccess() {
+        if calendar.access == .notDetermined {
+            NSApp.activate()
+            calendar.requestAccess()
+        } else {
+            collapse(waitForPointerToLeave: true)
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
+    func openCalendar() {
+        collapse(waitForPointerToLeave: true)
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+    }
+
+    func showMenu(for meeting: Meeting) {
+        let menu = NSMenu()
+        let join = menuItem(
+            meeting.account.map { "Join as \($0)" } ?? "Join",
+            symbol: "video",
+            action: #selector(menuJoin(_:))
+        )
+        join.representedObject = MeetingChoice(meeting: meeting, account: meeting.account)
+        menu.addItem(join)
+
+        if meeting.service == .meet {
+            let others = meeting.accounts.filter { $0 != meeting.account }
+            let joinAs = NSMenuItem(title: "Join As", action: nil, keyEquivalent: "")
+            joinAs.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: nil)
+            let submenu = NSMenu()
+            for account in others {
+                let item = menuItem(account, action: #selector(menuJoin(_:)))
+                item.representedObject = MeetingChoice(meeting: meeting, account: account)
+                submenu.addItem(item)
+            }
+            if !others.isEmpty { submenu.addItem(.separator()) }
+            let fallback = menuItem("Browser’s Default Account", action: #selector(menuJoin(_:)))
+            fallback.representedObject = MeetingChoice(meeting: meeting, account: nil)
+            submenu.addItem(fallback)
+            joinAs.submenu = submenu
+            menu.addItem(joinAs)
+        }
+
+        menu.addItem(.separator())
+        let copy = menuItem("Copy Link", symbol: "link", action: #selector(menuCopyMeetingLink(_:)))
+        copy.representedObject = MeetingChoice(meeting: meeting, account: meeting.account)
+        menu.addItem(copy)
+        let show = menuItem("Show in Calendar", symbol: "calendar", action: #selector(menuShowMeeting(_:)))
+        show.representedObject = MeetingChoice(meeting: meeting, account: meeting.account)
+        menu.addItem(show)
+        present(menu)
+    }
+
+    @objc private func menuJoin(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? MeetingChoice else { return }
+        join(choice.meeting, as: choice.account)
+    }
+
+    @objc private func menuCopyMeetingLink(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? MeetingChoice else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(choice.meeting.joinURL(as: choice.account).absoluteString, forType: .string)
+    }
+
+    @objc private func menuShowMeeting(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? MeetingChoice else { return }
+        collapse(waitForPointerToLeave: true)
+        let id = choice.meeting.eventIdentifier?.addingPercentEncoding(withAllowedCharacters: .alphanumerics)
+        if let id, let url = URL(string: "ical://ekevent/\(id)?method=show&options=more"),
+           NSWorkspace.shared.urlForApplication(toOpen: url) != nil {
+            NSWorkspace.shared.open(url)
+        } else {
+            openCalendar()
+        }
     }
 
     private func deleteKey(_ id: UUID) {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
             model.deckKeys.removeAll { $0.id == id }
         }
-        DeckStore.save(model.deckKeys)
+        saveDeck()
     }
 
     private func moveKey(_ id: UUID, by offset: Int) {
@@ -489,7 +610,7 @@ final class IslandController: NSObject, IslandActions {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
             model.deckKeys.swapAt(index, index + offset)
         }
-        DeckStore.save(model.deckKeys)
+        saveDeck()
     }
 
     func showMenu(for key: DeckKey) {
@@ -529,7 +650,7 @@ final class IslandController: NSObject, IslandActions {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
             model.deckKeys.insert(copy, at: index + 1)
         }
-        DeckStore.save(model.deckKeys)
+        saveDeck()
     }
 
     @objc private func menuMoveKeyLeft(_ sender: NSMenuItem) {
@@ -565,6 +686,17 @@ final class IslandController: NSObject, IslandActions {
                 model.isConfirmingCleanup = false
             }
             if let page = model.currentPage, page.access != .ok { monitors[page.id]?.refresh() }
+            refreshPageData()
+        }
+    }
+
+    /// Pages that aren't folders have no watcher pushing changes in, so look
+    /// again whenever one comes into view.
+    private func refreshPageData() {
+        switch model.currentPage?.kind {
+        case .meetings: calendar.refresh()
+        case .shortcuts: if Preferences.syncsShortcuts { deckSync.check() }
+        default: break
         }
     }
 
@@ -589,6 +721,7 @@ final class IslandController: NSObject, IslandActions {
                 model.pageIndex = 0
             }
             if let page = model.currentPage, page.access != .ok { monitors[page.id]?.refresh() }
+            refreshPageData()
             Haptics.perform(.levelChange)
         case .peek:
             animation = .spring(response: 0.46, dampingFraction: 0.7)
@@ -1047,10 +1180,36 @@ final class IslandController: NSObject, IslandActions {
         let deck = menuItem("Shortcuts Page", action: #selector(menuToggleShortcutsPage))
         deck.state = Preferences.showsShortcutsPage ? .on : .off
         menu.addItem(deck)
+        let meetings = menuItem("Meetings Page", action: #selector(menuToggleMeetingsPage))
+        meetings.state = Preferences.showsMeetingsPage ? .on : .off
+        menu.addItem(meetings)
         if model.pages.count > 1 {
             menu.addItem(menuItem("Arrange Rows…", symbol: "line.3.horizontal", action: #selector(menuArrangeRows)))
         }
         menu.addItem(.separator())
+
+        switch model.currentPage?.kind {
+        case .meetings where calendar.access == .granted:
+            menu.addItem(.sectionHeader(title: "Meetings"))
+            menu.addItem(calendarsMenuItem())
+            menu.addItem(.separator())
+        case .shortcuts:
+            menu.addItem(.sectionHeader(title: "Shortcuts"))
+            let sync = menuItem("Sync with iCloud", symbol: "icloud", action: #selector(menuToggleDeckSync))
+            sync.state = Preferences.syncsShortcuts ? .on : .off
+            sync.isEnabled = DeckSync.isAvailable
+            sync.toolTip = DeckSync.isAvailable
+                ? "Keeps these shortcuts the same on every Mac signed in to your Apple ID."
+                : "Turn on iCloud Drive in System Settings to sync shortcuts."
+            menu.addItem(sync)
+            menu.addItem(menuItem("Export Shortcuts…", symbol: "square.and.arrow.up", action: #selector(menuExportDeck)))
+            menu.addItem(menuItem("Import Shortcuts…", symbol: "square.and.arrow.down", action: #selector(menuImportDeck)))
+            menu.addItem(.separator())
+        default:
+            break
+        }
+
+        menu.addItem(displayMenuItem())
 
         let preview = menuItem("Preview New Files", action: #selector(menuTogglePreview))
         preview.state = Preferences.showsNewDownloadPreview ? .on : .off
@@ -1069,7 +1228,61 @@ final class IslandController: NSObject, IslandActions {
         quit.keyEquivalent = "q"
         menu.addItem(quit)
 
+        menu.autoenablesItems = false
         present(menu)
+    }
+
+    /// Every calendar by account, ticked if its meetings show.
+    private func calendarsMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Calendars", action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: nil)
+        let submenu = NSMenu()
+        for (account, calendars) in calendar.choices() {
+            submenu.addItem(.sectionHeader(title: account))
+            for choice in calendars {
+                let entry = menuItem(choice.title, action: #selector(menuToggleCalendar(_:)))
+                entry.representedObject = choice.id
+                entry.state = choice.isIncluded ? .on : .off
+                entry.image = Self.swatch(choice.color)
+                submenu.addItem(entry)
+            }
+        }
+        item.submenu = submenu
+        return item
+    }
+
+    private static func swatch(_ color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 10, height: 10), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5)).fill()
+            return true
+        }
+    }
+
+    /// Which display the island lives on. Displays without a notch get a
+    /// drawn one at the top center, always visible.
+    private func displayMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Show On", action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: "display", accessibilityDescription: nil)
+        let submenu = NSMenu()
+        let chosen = Preferences.displayID
+        let available = NSScreen.screens.compactMap(\.displayUUID)
+
+        let automatic = menuItem("Automatic", action: #selector(menuChooseDisplay(_:)))
+        automatic.state = chosen == nil || !available.contains(chosen!) ? .on : .off
+        automatic.toolTip = "The display with a notch, or the main display"
+        submenu.addItem(automatic)
+        submenu.addItem(.separator())
+        for screen in NSScreen.screens {
+            guard let id = screen.displayUUID else { continue }
+            let name = screen.safeAreaInsets.top > 0 ? "\(screen.localizedName) (notch)" : screen.localizedName
+            let entry = menuItem(name, action: #selector(menuChooseDisplay(_:)))
+            entry.representedObject = id
+            entry.state = id == chosen ? .on : .off
+            submenu.addItem(entry)
+        }
+        item.submenu = submenu
+        return item
     }
 
     /// Menus from an inactive app get mouse-moved events at a trickle, so
@@ -1184,6 +1397,83 @@ final class IslandController: NSObject, IslandActions {
         withAnimation(.spring(response: 0.44, dampingFraction: 0.82)) { reloadFolders() }
     }
 
+    @objc private func menuToggleMeetingsPage() {
+        Preferences.showsMeetingsPage.toggle()
+        withAnimation(.spring(response: 0.44, dampingFraction: 0.82)) { reloadFolders() }
+        if Preferences.showsMeetingsPage { calendar.refresh() }
+    }
+
+    @objc private func menuToggleCalendar(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        var overrides = Preferences.calendarOverrides
+        overrides[id] = sender.state != .on
+        Preferences.calendarOverrides = overrides
+        calendar.refresh()
+    }
+
+    @objc private func menuChooseDisplay(_ sender: NSMenuItem) {
+        Preferences.displayID = sender.representedObject as? String
+        collapse()
+        updateScreen()
+    }
+
+    @objc private func menuToggleDeckSync() {
+        Preferences.syncsShortcuts.toggle()
+        if Preferences.syncsShortcuts {
+            startDeckSync()
+            showToast(Toast(symbol: "icloud.fill", text: "Shortcuts sync with iCloud", url: nil))
+        } else {
+            deckSync.stop()
+            Preferences.lastShortcutsSync = nil
+        }
+    }
+
+    @objc private func menuExportDeck() {
+        collapse(waitForPointerToLeave: true)
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "QuickFolder Shortcuts.json"
+        panel.allowedContentTypes = [.json]
+        NSApp.activate()
+        if panel.runModal() == .OK, let url = panel.url,
+           let data = DeckFile(updated: Date(), keys: model.deckKeys).encoded() {
+            do {
+                try data.write(to: url, options: .atomic)
+            } catch {
+                NSSound.beep()
+            }
+        }
+        NSApp.deactivate()
+    }
+
+    /// Adds the keys from a shared file, skipping ones you already have.
+    @objc private func menuImportDeck() {
+        collapse(waitForPointerToLeave: true)
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Import"
+        NSApp.activate()
+        defer { NSApp.deactivate() }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let data = try? Data(contentsOf: url), let file = DeckFile.decode(data) else {
+            NSSound.beep()
+            return
+        }
+        let added = file.keys
+            .filter { !model.deckKeys.contains(sameAs: $0) }
+            .map { key -> DeckKey in
+                var copy = key
+                copy.id = UUID()
+                return copy
+            }
+        model.deckKeys.append(contentsOf: added)
+        saveDeck()
+        if let index = model.pages.firstIndex(where: { $0.kind == .shortcuts }) {
+            model.pageIndex = index
+            collapsedAt = Date()
+        }
+    }
+
     @objc private func menuToggleHaptics() {
         Preferences.hapticsEnabled.toggle()
         Haptics.perform(.levelChange)
@@ -1236,6 +1526,14 @@ final class IslandController: NSObject, IslandActions {
                         }
                         self.run(self.model.deckKeys[index])
                     }
+                }
+                // QF_DEBUG_MEETINGS fills the Meetings page with samples, without asking for Calendar access.
+                if env["QF_DEBUG_MEETINGS"] != nil, let index = self.model.pages.firstIndex(where: { $0.kind == .meetings }) {
+                    self.calendar.onChange = nil
+                    self.calendar.onAccessChange = nil
+                    self.model.calendarAccess = .granted
+                    self.model.meetings = Meeting.samples
+                    self.selectPage(index)
                 }
                 if env["QF_DEBUG_ARRANGE"] != nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.setArranging(true) }
@@ -1295,5 +1593,16 @@ private final class OpenWithMenu: NSObject, NSMenuDelegate {
             menu.addItem(entry)
             if index == 0 && apps.count > 1 { menu.addItem(.separator()) }
         }
+    }
+}
+
+/// What a meeting menu item acts on.
+private final class MeetingChoice: NSObject {
+    let meeting: Meeting
+    let account: String?
+
+    init(meeting: Meeting, account: String?) {
+        self.meeting = meeting
+        self.account = account
     }
 }
