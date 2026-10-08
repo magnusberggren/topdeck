@@ -60,7 +60,12 @@ final class IslandController: NSObject, IslandActions {
     private var tasks: [Activity] = []
 
     private let deckEditor = DeckEditor()
-    private let deckSync = DeckSync()
+    private let shortcutsFile = CloudFile<[DeckKey]>.shortcuts()
+    private let settingsFile = CloudFile<SyncedSettings>.settings()
+    /// The settings as last synced, so applying them doesn't echo back.
+    private var syncedSettings: SyncedSettings?
+    private var settingsPush: DispatchWorkItem?
+    private var syncCheckTimer: Timer?
     private let calendar = CalendarStore()
     private var toastTimer: Timer?
     private var cleanupConfirmTimer: Timer?
@@ -107,12 +112,7 @@ final class IslandController: NSObject, IslandActions {
         panel.orderFrontRegardless()
 
         model.deckKeys = DeckStore.load()
-        deckSync.onRemoteChange = { [weak self] keys in
-            guard let self, keys != self.model.deckKeys else { return }
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { self.model.deckKeys = keys }
-            DeckStore.save(keys)
-        }
-        if Preferences.syncsShortcuts { startDeckSync() }
+        installSync()
 
         model.calendarAccess = calendar.access
         calendar.onAccessChange = { [weak self] access in
@@ -528,11 +528,83 @@ final class IslandController: NSObject, IslandActions {
 
     private func saveDeck() {
         DeckStore.save(model.deckKeys)
-        if Preferences.syncsShortcuts { deckSync.save(model.deckKeys) }
+        if Preferences.syncsWithiCloud { shortcutsFile.save(model.deckKeys) }
     }
 
-    private func startDeckSync() {
-        deckSync.start(local: model.deckKeys, hasLocalKeys: DeckStore.hasSavedKeys)
+    // MARK: - iCloud sync
+
+    /// Your Apple ID is the account: shortcuts and settings live in iCloud
+    /// Drive, so a new Mac picks up your setup on first launch.
+    private func installSync() {
+        shortcutsFile.onRemoteChange = { [weak self] keys in
+            guard let self, keys != self.model.deckKeys else { return }
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { self.model.deckKeys = keys }
+            DeckStore.save(keys)
+        }
+        settingsFile.onRemoteChange = { [weak self] settings in
+            self?.applySyncedSettings(settings)
+        }
+        // Any settings change on this Mac goes out a moment later.
+        observers.append(NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.scheduleSettingsPush() })
+
+        if Preferences.syncsWithiCloud { startSync() }
+        syncCheckTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in self?.checkSync() }
+        syncCheckTimer?.tolerance = 60
+    }
+
+    private func startSync() {
+        let hasLocalKeys = DeckStore.hasSavedKeys
+        shortcutsFile.start(local: model.deckKeys) { remote, local in
+            // A Mac that never changed its shortcuts takes the shared ones as they are.
+            guard hasLocalKeys else { return remote }
+            let ids = Set(remote.map(\.id))
+            return remote + local.filter { !ids.contains($0.id) && !remote.contains(sameAs: $0) }
+        }
+        let current = SyncedSettings.current()
+        syncedSettings = current
+        // Joining for the first time, the shared setup wins: that's the point
+        // of installing on another Mac.
+        settingsFile.start(local: current) { remote, _ in remote }
+    }
+
+    /// The folder watcher catches most changes from other Macs; this catches
+    /// the rest, whenever the island opens and every few minutes.
+    private func checkSync() {
+        guard Preferences.syncsWithiCloud else { return }
+        shortcutsFile.check()
+        settingsFile.check()
+    }
+
+    private func stopSync() {
+        shortcutsFile.stop()
+        settingsFile.stop()
+        syncedSettings = nil
+    }
+
+    private func scheduleSettingsPush() {
+        guard Preferences.syncsWithiCloud, syncedSettings != nil else { return }
+        settingsPush?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let current = SyncedSettings.current()
+            guard current != self.syncedSettings else { return }
+            self.syncedSettings = current
+            self.settingsFile.save(current)
+        }
+        settingsPush = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    private func applySyncedSettings(_ settings: SyncedSettings) {
+        syncedSettings = settings
+        guard settings != SyncedSettings.current() else { return }
+        settings.apply()
+        withAnimation(.spring(response: 0.44, dampingFraction: 0.82)) { reloadFolders() }
+        calendar.refresh()
+        scheduleReminder()
+        if Preferences.updatesAutomatically { Updater.shared.start() } else { Updater.shared.stop() }
     }
 
     // MARK: - Meetings
@@ -721,7 +793,6 @@ final class IslandController: NSObject, IslandActions {
     private func refreshPageData() {
         switch model.currentPage?.kind {
         case .meetings: calendar.refresh()
-        case .shortcuts: if Preferences.syncsShortcuts { deckSync.check() }
         default: break
         }
     }
@@ -751,6 +822,7 @@ final class IslandController: NSObject, IslandActions {
             }
             if let page = model.currentPage, page.access != .ok { monitors[page.id]?.refresh() }
             refreshPageData()
+            checkSync()
             Haptics.perform(.levelChange)
         case .peek:
             animation = .spring(response: 0.46, dampingFraction: 0.7)
@@ -1274,13 +1346,6 @@ final class IslandController: NSObject, IslandActions {
             menu.addItem(.separator())
         case .shortcuts:
             menu.addItem(.sectionHeader(title: "Shortcuts"))
-            let sync = menuItem("Sync with iCloud", symbol: "icloud", action: #selector(menuToggleDeckSync))
-            sync.state = Preferences.syncsShortcuts ? .on : .off
-            sync.isEnabled = DeckSync.isAvailable
-            sync.toolTip = DeckSync.isAvailable
-                ? "Keeps these shortcuts the same on every Mac signed in to your Apple ID."
-                : "Turn on iCloud Drive in System Settings to sync shortcuts."
-            menu.addItem(sync)
             menu.addItem(menuItem("Export Shortcuts…", symbol: "square.and.arrow.up", action: #selector(menuExportDeck)))
             menu.addItem(menuItem("Import Shortcuts…", symbol: "square.and.arrow.down", action: #selector(menuImportDeck)))
             menu.addItem(.separator())
@@ -1301,6 +1366,14 @@ final class IslandController: NSObject, IslandActions {
         let login = menuItem("Open at Login", action: #selector(menuToggleLogin))
         login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
+
+        let sync = menuItem("Sync with iCloud", action: #selector(menuToggleSync))
+        sync.state = Preferences.syncsWithiCloud ? .on : .off
+        sync.isEnabled = CloudSync.isAvailable
+        sync.toolTip = CloudSync.isAvailable
+            ? "Shortcuts and settings stay the same on every Mac signed in to your Apple ID."
+            : "Turn on iCloud Drive in System Settings to sync your setup."
+        menu.addItem(sync)
 
         menu.addItem(.separator())
         let autoUpdate = menuItem("Update Automatically", action: #selector(menuToggleAutoUpdate))
@@ -1509,14 +1582,13 @@ final class IslandController: NSObject, IslandActions {
         updateScreen()
     }
 
-    @objc private func menuToggleDeckSync() {
-        Preferences.syncsShortcuts.toggle()
-        if Preferences.syncsShortcuts {
-            startDeckSync()
-            showToast(Toast(symbol: "icloud.fill", text: "Shortcuts sync with iCloud", url: nil))
+    @objc private func menuToggleSync() {
+        Preferences.syncsWithiCloud = !Preferences.syncsWithiCloud
+        if Preferences.syncsWithiCloud {
+            startSync()
+            showToast(Toast(symbol: "icloud.fill", text: "Your setup syncs with iCloud", url: nil))
         } else {
-            deckSync.stop()
-            Preferences.lastShortcutsSync = nil
+            stopSync()
         }
     }
 

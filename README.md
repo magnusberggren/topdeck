@@ -46,7 +46,7 @@ xcrun notarytool store-credentials notary --apple-id <Apple ID> --team-id AURJLA
 - **New-file preview:** when a file lands, the notch shows it for a few seconds. Point at the preview to keep it up, then click to open it or drag it straight out. Point at the notch itself to open the full shelf.
 - **Meetings page:** your upcoming video calls (Google Meet, Zoom, Teams and more) from every account in the Calendar app. Click one to join. Google Meet opens as the account that was invited, so you never have to switch accounts in the browser. Right-click for Join As, Copy Link and Show in Calendar. A minute before a call starts it pops out of the notch with a Join button; turn that off under ⋯ › Remind 1 Minute Before on the Meetings page. Only your own calendars count by default, not ones colleagues share with you; change that under ⋯ › Calendars. Add your Google accounts in System Settings › Internet Accounts if they aren't in Calendar yet.
 - **Any display:** ⋯ › Show On puts the island on the display you choose. Displays without a notch (like a Mac Studio's) get a drawn notch at the top center, always visible.
-- **Shortcuts everywhere:** on the Shortcuts page, ⋯ › Sync with iCloud keeps your shortcuts the same on every Mac signed in to your Apple ID, through iCloud Drive. Export Shortcuts… and Import Shortcuts… share them as a file.
+- **Same setup on every Mac:** your Apple ID is the account. Shortcuts and settings (folders, row order, pages, reminders, hidden calendars) live in your own iCloud Drive, so installing QuickFolder on another Mac signed in to the same Apple ID brings your setup along. Which display the island uses stays per Mac. Turn it off with ⋯ › Sync with iCloud. On the Shortcuts page, Export Shortcuts… and Import Shortcuts… share shortcuts with someone else as a file.
 - **Right-click** for Open With, Show in Finder, Quick Look, Copy and Move to Trash.
 - **Archives** (.zip, .tar.gz and friends) get a small button when you point at them: it extracts next to the archive and moves the archive to the Trash. One item inside lands as is; several go into a folder named after the archive. Nothing is ever overwritten.
 - **Disk images** (.dmg) get an Install button: it mounts the image, copies the app to /Applications (an older version goes to the Trash), ejects, and trashes the .dmg. Images with a license agreement or an installer package open normally instead.
@@ -76,6 +76,12 @@ Hover it to open that folder's shelf.
 On Macs without a notch, a small black notch appears at the top center of the
 screen instead.
 
+## Privacy
+
+QuickFolder has no server and no account of its own. Your files, calendar and
+shortcuts stay on your Mac and in your own iCloud Drive. The only thing it
+asks the internet for is whether there's a newer version on GitHub.
+
 ## Permissions
 
 | Permission | Asked for when | Why |
@@ -86,7 +92,7 @@ screen instead.
 | Removable volumes | First Install | To look inside the mounted disk image |
 | App Management | First Install that replaces an existing app | macOS protects installed apps from being replaced |
 | Calendars | Allow Calendar Access on the Meetings page | To list your upcoming video calls |
-| iCloud Drive | Turning on Sync with iCloud | To read and write the shared shortcuts file |
+| iCloud Drive | First launch, while Sync with iCloud is on | To keep your setup in iCloud Drive/QuickFolder |
 
 ## Develop
 
@@ -113,7 +119,7 @@ your keychain, so macOS keeps the permissions across rebuilds. Set
 | File | What it does |
 | --- | --- |
 | `Meetings.swift` | Upcoming video calls from Calendar, and which account to join as |
-| `DeckSync.swift` | Shortcuts file for iCloud Drive sync and export |
+| `CloudSync.swift` | Shortcuts and settings files in iCloud Drive, and shortcut export |
 | `Updater.swift` | Self-update from GitHub Releases, with a signature check |
 | `IslandController.swift` | Window, hover detection, open/peek/close state, scrolling, menus |
 | `IslandView.swift` | SwiftUI: the shape, shelf, tiles, and preview |
