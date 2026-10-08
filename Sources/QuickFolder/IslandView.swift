@@ -1029,9 +1029,13 @@ private struct DownloadPeek: View {
         // Results like an installed app aren't in the thumbnail cache.
         let thumbnail = model.thumbnails.thumbnail(for: item)
             ?? Thumbnail(image: NSWorkspace.shared.icon(forFile: item.url.path), isIcon: true)
+        let isHovered = model.hovered == .peek && !model.isDraggingFile
+        let isPressed = model.pressed == .peek
         HStack(spacing: 11) {
+            // Lifts under the pointer to say it can be picked up.
             ThumbnailView(thumbnail: thumbnail)
                 .frame(width: 34, height: 34)
+                .scaleEffect(isPressed ? 0.92 : (isHovered ? 1.08 : 1))
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.name)
@@ -1053,6 +1057,12 @@ private struct DownloadPeek: View {
                 .foregroundStyle(.white, Color(red: 0.2, green: 0.78, blue: 0.35))
                 .symbolEffect(.bounce, value: item.id)
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(isHovered ? 0.08 : 0)))
+        .padding(.horizontal, -6)
+        .animation(.smooth(duration: 0.18), value: isHovered)
+        .animation(.spring(response: 0.22, dampingFraction: 0.6), value: isPressed)
         .contentShape(Rectangle())
         .overlay {
             if model.state == .peek {

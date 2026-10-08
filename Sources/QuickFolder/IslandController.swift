@@ -16,6 +16,8 @@ final class IslandController: NSObject, IslandActions {
     private var peekTimer: Timer?
 
     private var isMenuOpen = false
+    /// The pointer is on a download preview, so it stays up until it leaves.
+    private var isHoldingPeek = false
     /// After the island closes because of a click, the pointer must leave the
     /// notch before hovering opens it again.
     private var waitsForPointerToLeave = false
@@ -64,6 +66,8 @@ final class IslandController: NSObject, IslandActions {
         static let peekHoverDelay: TimeInterval = 0.03
         static let leaveDelay: TimeInterval = 0.12
         static let peekDuration: TimeInterval = 4.2
+        /// How long a preview stays after the pointer moves off it.
+        static let peekLinger: TimeInterval = 1.2
         /// Reopening after this long starts back on the first folder.
         static let pageMemory: TimeInterval = 30
     }
@@ -618,9 +622,33 @@ final class IslandController: NSObject, IslandActions {
         guard model.state != .expanded else { return }
         model.peek = content
         setState(.peek)
+        isHoldingPeek = false
+        schedulePeekEnd(after: duration)
+        updatePeekHold()
+    }
+
+    private func schedulePeekEnd(after duration: TimeInterval) {
+        peekTimer?.invalidate()
         peekTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
             guard let self, self.model.state == .peek else { return }
             self.collapse()
+        }
+    }
+
+    /// A download preview is something to click or drag out, so it stays up
+    /// while the pointer is on it and lingers briefly once it leaves.
+    private func updatePeekHold() {
+        guard model.state == .peek, case .download = model.peek else { return }
+        let point = NSEvent.mouseLocation
+        let hold = model.isDraggingFile
+            || model.metrics.screenRect(for: .peek).contains(point)
+            || model.metrics.hotZone.contains(point)
+        guard hold != isHoldingPeek else { return }
+        isHoldingPeek = hold
+        if hold {
+            peekTimer?.invalidate(); peekTimer = nil
+        } else {
+            schedulePeekEnd(after: Timing.peekLinger)
         }
     }
 
@@ -679,9 +707,20 @@ final class IslandController: NSObject, IslandActions {
             }
 
         case .peek:
-            let rect = metrics.screenRect(for: .peek).union(metrics.hotZone)
-            if rect.contains(point) && !dragging {
-                scheduleExpand(after: Timing.peekHoverDelay)
+            let rect: CGRect
+            let delay: TimeInterval
+            if case .download = model.peek {
+                // Pointing at the file leaves it grabbable; the notch itself
+                // still opens the shelf.
+                updatePeekHold()
+                rect = metrics.hotZone
+                delay = Timing.hoverDelay
+            } else {
+                rect = metrics.screenRect(for: .peek).union(metrics.hotZone)
+                delay = Timing.peekHoverDelay
+            }
+            if rect.contains(point) && !dragging && !model.isDraggingFile {
+                scheduleExpand(after: delay)
             } else {
                 expandTimer?.invalidate(); expandTimer = nil
             }

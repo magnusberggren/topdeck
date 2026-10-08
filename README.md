@@ -18,6 +18,7 @@ launch turns on Open at Login.
 - **Point at the notch.** The island opens with your 40 newest downloads, newest first.
 - **Click** a file to open it.
 - **Drag** a file out to move it, like dragging out of Finder. Hold Option to copy. The island gets out of the way as soon as the file leaves it.
+- **New-file preview:** when a file lands, the notch shows it for a few seconds. Point at the preview to keep it up, then click to open it or drag it straight out. Point at the notch itself to open the full shelf.
 - **Right-click** for Open With, Show in Finder, Quick Look, Copy and Move to Trash.
 - **Archives** (.zip, .tar.gz and friends) get a small button when you point at them: it extracts next to the archive and moves the archive to the Trash. One item inside lands as is; several go into a folder named after the archive. Nothing is ever overwritten.
 - **Disk images** (.dmg) get an Install button: it mounts the image, copies the app to /Applications (an older version goes to the Trash), ejects, and trashes the .dmg. Images with a license agreement or an installer package open normally instead.
