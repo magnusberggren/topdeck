@@ -16,9 +16,10 @@ From source: `scripts/install.sh` builds a release app, copies it to
 `/Applications`, and launches it. The first launch turns on Open at Login.
 
 TopDeck updates itself: every 6 hours it looks for a newer GitHub release,
-checks it's signed by the same developer, swaps it in and restarts, waiting
-until the island is closed and no call is about to start. ⋯ › Check for
-Updates… looks right away; ⋯ › Update Automatically turns it off.
+checks it's signed by the same developer, swaps it in and restarts as soon as
+the island closes (unless a call is about to start). ⋯ › Check for Updates…
+updates right away, and the menu shows which version you have. If an update
+can't go in, the notch says so. ⋯ › Update Automatically turns it off.
 
 ## Release
 

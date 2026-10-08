@@ -15,6 +15,7 @@ enum Preferences {
         static let showsMeetingsPage = "showsMeetingsPage"
         static let remindsOfMeetings = "remindsOfMeetings"
         static let updatesAutomatically = "updatesAutomatically"
+        static let wantsOpenAtLogin = "wantsOpenAtLogin"
         static let calendarOverrides = "calendarOverrides"
         static let displayID = "displayID"
         static let syncsWithiCloud = "syncsWithiCloud"
@@ -28,6 +29,7 @@ enum Preferences {
             Key.showsMeetingsPage: true,
             Key.remindsOfMeetings: true,
             Key.updatesAutomatically: true,
+            Key.wantsOpenAtLogin: true,
             Key.syncsWithiCloud: true,
         ])
     }
@@ -50,6 +52,12 @@ enum Preferences {
     static var showsMeetingsPage: Bool {
         get { defaults.bool(forKey: Key.showsMeetingsPage) }
         set { defaults.set(newValue, forKey: Key.showsMeetingsPage) }
+    }
+
+    /// Your choice for Open at Login, kept so a reinstall can restore it.
+    static var wantsOpenAtLogin: Bool {
+        get { defaults.bool(forKey: Key.wantsOpenAtLogin) }
+        set { defaults.set(newValue, forKey: Key.wantsOpenAtLogin) }
     }
 
     /// Download and install new releases from GitHub on its own.
@@ -144,10 +152,22 @@ enum LoginItem {
         }
     }
 
+    /// Puts the app back in the login items if it fell out (a reinstall or
+    /// the rename from QuickFolder) while you still want it there. Leaves it
+    /// alone if you switched it off, here or in System Settings.
+    static func repair() {
+        guard Bundle.main.bundlePath.hasPrefix("/Applications/"), Preferences.wantsOpenAtLogin else { return }
+        queue.async {
+            guard SMAppService.mainApp.status == .notRegistered else { return }
+            DispatchQueue.main.async { setEnabled(true) }
+        }
+    }
+
     static func setEnabled(_ enabled: Bool) {
         // Registering only makes sense for a real .app bundle, not `swift run`.
         guard Bundle.main.bundleURL.pathExtension == "app" else { return }
         isEnabled = enabled
+        Preferences.wantsOpenAtLogin = enabled
         queue.async {
             do {
                 if enabled {
