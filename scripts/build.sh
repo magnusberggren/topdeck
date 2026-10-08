@@ -49,6 +49,10 @@ if [ -z "${SIGN_IDENTITY:-}" ]; then
   fi
   SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 fi
-codesign --force --options runtime --entitlements Resources/QuickFolder.entitlements --sign "$SIGN_IDENTITY" "$APP" >/dev/null
+# Notarization needs a secure timestamp, which takes a round trip to Apple,
+# so only release packaging asks for one.
+TIMESTAMP_FLAG="--timestamp=none"
+[ "${TIMESTAMP:-0}" = "1" ] && TIMESTAMP_FLAG="--timestamp"
+codesign --force --options runtime $TIMESTAMP_FLAG --entitlements Resources/QuickFolder.entitlements --sign "$SIGN_IDENTITY" "$APP" >/dev/null
 AUTHORITY="$(codesign -dvv "$APP" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
 echo "Built $APP (signed with: ${AUTHORITY:-ad-hoc})"

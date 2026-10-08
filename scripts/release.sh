@@ -1,8 +1,8 @@
 #!/bin/bash
 # Builds, signs and publishes a release that installed copies update to.
 #   scripts/release.sh            release main as v1.<commit count>
-# Needs: a Developer ID certificate in the keychain, `gh` signed in, and a
-# clean checkout of main that's pushed.
+# Needs: a Developer ID certificate and the `notary` profile (see
+# scripts/package.sh), `gh` signed in, and a clean checkout of main that's pushed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,15 +20,7 @@ if gh release view "$TAG" >/dev/null 2>&1; then
   echo "$TAG is already released." >&2; exit 1
 fi
 
-BUILD="$BUILD" scripts/build.sh
-codesign --verify --strict --deep build/QuickFolder.app
-if ! codesign -dvv build/QuickFolder.app 2>&1 | grep -q "Authority=Developer ID Application"; then
-  echo "Not signed with a Developer ID certificate; other Macs won't accept it." >&2; exit 1
-fi
+BUILD="$BUILD" scripts/package.sh
 
-ZIP="build/QuickFolder.zip"
-rm -f "$ZIP"
-ditto -c -k --keepParent build/QuickFolder.app "$ZIP"
-
-gh release create "$TAG" "$ZIP" --target "$(git rev-parse HEAD)" --title "QuickFolder 1.$BUILD" --generate-notes
+gh release create "$TAG" build/release/QuickFolder.dmg build/release/QuickFolder.zip --target "$(git rev-parse HEAD)" --title "QuickFolder 1.$BUILD" --generate-notes
 echo "Released $TAG. Installed copies pick it up within 6 hours, or at once from ⋯ › Check for Updates…"

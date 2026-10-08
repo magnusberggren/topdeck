@@ -6,12 +6,11 @@ anywhere.
 
 ## Install
 
-On any Mac, no Xcode needed:
+1. Download [QuickFolder.dmg](https://github.com/magnusberggren/topdeck/releases/latest/download/QuickFolder.dmg).
+2. Open it and drag QuickFolder to Applications.
+3. Open QuickFolder from Applications, then point at the notch.
 
-```bash
-curl -fL https://github.com/magnusberggren/topdeck/releases/latest/download/QuickFolder.zip -o /tmp/QuickFolder.zip \
-  && ditto -x -k /tmp/QuickFolder.zip /Applications && open /Applications/QuickFolder.app
-```
+It's notarized by Apple, so it opens without warnings.
 
 From source: `scripts/install.sh` builds a release app, copies it to
 `/Applications`, and launches it. The first launch turns on Open at Login.
@@ -27,8 +26,17 @@ Updates… looks right away; ⋯ › Update Automatically turns it off.
 scripts/release.sh
 ```
 
-From a clean, pushed `main`: builds, signs with your Developer ID, and publishes
-`v1.<commit count>` with `QuickFolder.zip` to GitHub Releases.
+From a clean, pushed `main`: builds, signs with the newest Developer ID
+certificate, has Apple notarize the app and the disk image, and publishes
+`v1.<commit count>` with `QuickFolder.dmg` (for people) and `QuickFolder.zip`
+(for the updater) to GitHub Releases. `scripts/package.sh` does everything
+except publishing.
+
+Notarizing needs a keychain profile, set up once per Mac:
+
+```bash
+xcrun notarytool store-credentials notary --apple-id <Apple ID> --team-id AURJLA4GTL
+```
 
 ## Use
 
