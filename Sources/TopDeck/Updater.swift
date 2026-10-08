@@ -251,8 +251,26 @@ final class Updater {
     /// After the rename, Open at Login has to point at the new name.
     static func restoreLoginItemAfterRename() {
         guard UserDefaults.standard.object(forKey: reregisterKey) != nil else { return }
+        forgetOldName()
         if UserDefaults.standard.bool(forKey: reregisterKey) { LoginItem.setEnabled(true) }
         UserDefaults.standard.removeObject(forKey: reregisterKey)
+    }
+
+    /// macOS remembers apps by where it has seen them, including the old
+    /// QuickFolder.app and the mounted QuickFolder.dmg, and shows that name in
+    /// System Settings and the login items. Forget those so it says TopDeck.
+    private static func forgetOldName() {
+        let tool = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+        let old = ["/Applications/QuickFolder.app", "/Volumes/QuickFolder/QuickFolder.app"]
+        for arguments in old.map({ ["-u", $0] }) + [["-f", Bundle.main.bundlePath]] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: tool)
+            process.arguments = arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            process.waitUntilExit()
+        }
     }
 
     private static let reregisterKey = "reregisterLoginItemAfterRename"
