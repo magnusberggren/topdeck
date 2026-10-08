@@ -47,7 +47,7 @@ final class IslandController: NSObject, IslandActions {
     private var collapsedAt = Date.distantPast
     private var openWithMenu: OpenWithMenu?
 
-    /// While QuickFolder itself is adding files (extracting, installing),
+    /// While TopDeck itself is adding files (extracting, installing),
     /// they shouldn't pop up as new downloads.
     private var runningTasks = 0
     private var quietUntil = Date.distantPast
@@ -56,7 +56,7 @@ final class IslandController: NSObject, IslandActions {
     /// Partial files seen in each folder, by folder path.
     private var partials: [String: [String]] = [:]
     private var reportedDownloads: [ReportedDownload] = []
-    /// Extractions and installs QuickFolder is running.
+    /// Extractions and installs TopDeck is running.
     private var tasks: [Activity] = []
 
     private let deckEditor = DeckEditor()
@@ -94,7 +94,10 @@ final class IslandController: NSObject, IslandActions {
         /// resists and springs back, so a sloppy swipe doesn't switch.
         static let threshold: CGFloat = 64
         /// Mouse wheel lines needed to switch folders.
-        static let wheelThreshold: CGFloat = 3
+        /// Wheel notches needed to switch folders. One notch is deliberate.
+        static let wheelThreshold: CGFloat = 1
+        /// Points of smooth-wheel travel that count as one notch.
+        static let pointsPerNotch: CGFloat = 24
     }
 
     override init() {
@@ -117,7 +120,7 @@ final class IslandController: NSObject, IslandActions {
         model.calendarAccess = calendar.access
         calendar.onAccessChange = { [weak self] access in
             self?.model.calendarAccess = access
-            // QuickFolder came forward for the permission prompt; hand focus back.
+            // TopDeck came forward for the permission prompt; hand focus back.
             if NSApp.isActive && NSApp.keyWindow == nil && NSApp.modalWindow == nil { NSApp.deactivate() }
         }
         calendar.onChange = { [weak self] meetings in
@@ -153,7 +156,7 @@ final class IslandController: NSObject, IslandActions {
 
     func announceUpdate(to version: String) {
         showPeek(.message(
-            title: "Updating QuickFolder",
+            title: "Updating TopDeck",
             subtitle: "Version \(version) · back in a second",
             symbol: "arrow.down.circle.fill"
         ), duration: 4)
@@ -163,7 +166,7 @@ final class IslandController: NSObject, IslandActions {
         let place = model.metrics.hasNotch ? "the notch" : "the top of the screen"
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.showPeek(.message(
-                title: "QuickFolder is ready",
+                title: "TopDeck is ready",
                 subtitle: "Point at \(place) to see your downloads",
                 symbol: "tray.and.arrow.down.fill"
             ), duration: 5)
@@ -236,7 +239,7 @@ final class IslandController: NSObject, IslandActions {
     // MARK: - Activity
 
     /// Merges what browsers report with the partial files on disk (for apps
-    /// that don't report progress) and QuickFolder's own tasks.
+    /// that don't report progress) and TopDeck's own tasks.
     private func rebuildActivities() {
         var downloads: [String: Activity] = [:]
         for (folder, names) in partials {
@@ -1034,7 +1037,12 @@ final class IslandController: NSObject, IslandActions {
     /// first few points of a gesture decide which, and it sticks for the rest
     /// of that gesture. Mouse: the wheel switches folders, Shift-wheel scrolls.
     private func scroll(with event: NSEvent) {
-        guard event.hasPreciseScrollingDeltas else {
+        // Mice with smooth scrolling (Logitech and others) send precise deltas
+        // but no gesture phases, so they'd never start or end a gesture here.
+        // They get the wheel handling, like any other mouse.
+        let isGesture = event.hasPreciseScrollingDeltas
+            && !(event.phase.isEmpty && event.momentumPhase.isEmpty)
+        guard isGesture else {
             wheel(event)
             return
         }
@@ -1109,19 +1117,27 @@ final class IslandController: NSObject, IslandActions {
         let dx = event.scrollingDeltaX
         let dy = event.scrollingDeltaY
 
+        // Shift-wheel (or a sideways wheel) moves the shelf.
         if abs(dx) > abs(dy) {
             let maxOffset = model.maxScrollOffset
             guard maxOffset > 0 else { return }
-            rawScrollOffset = min(max(rawScrollOffset - dx * 12, 0), maxOffset)
+            // Line-based wheels report notches; about half a tile each.
+            let step = event.hasPreciseScrollingDeltas ? dx : dx * 44
+            rawScrollOffset = min(max(rawScrollOffset - step, 0), maxOffset)
             withAnimation(.smooth(duration: 0.28)) { model.scrollOffset = rawScrollOffset }
             return
         }
+        guard dy != 0 else { return }
 
         let now = ProcessInfo.processInfo.systemUptime
         guard model.pages.count > 1, now >= wheelLockedUntil else { return }
         if now - lastWheelTime > 0.35 { wheelPull = 0 }
         lastWheelTime = now
-        wheelPull += -dy
+        // Every notch counts the same, however slowly it's turned: macOS
+        // scales slow notches down to a fraction of a line.
+        wheelPull += event.hasPreciseScrollingDeltas
+            ? -dy / Paging.pointsPerNotch
+            : (dy > 0 ? -1 : 1)
 
         if abs(wheelPull) >= Paging.wheelThreshold {
             let forward = wheelPull > 0
@@ -1380,11 +1396,11 @@ final class IslandController: NSObject, IslandActions {
         autoUpdate.state = Preferences.updatesAutomatically ? .on : .off
         menu.addItem(autoUpdate)
         let check = menuItem("Check for Updates…", action: #selector(menuCheckForUpdates))
-        check.toolTip = "QuickFolder \(Updater.currentVersion)"
+        check.toolTip = "TopDeck \(Updater.currentVersion)"
         menu.addItem(check)
 
         menu.addItem(.separator())
-        let quit = menuItem("Quit QuickFolder", action: #selector(menuQuit))
+        let quit = menuItem("Quit TopDeck", action: #selector(menuQuit))
         quit.keyEquivalent = "q"
         menu.addItem(quit)
 
@@ -1446,7 +1462,7 @@ final class IslandController: NSObject, IslandActions {
     }
 
     /// Menus from an inactive app get mouse-moved events at a trickle, so
-    /// highlighting lags behind the pointer. QuickFolder activates just for
+    /// highlighting lags behind the pointer. TopDeck activates just for
     /// the menu and hands focus back afterwards, unless an action opened a
     /// window of ours (Quick Look, the folder picker).
     private func present(_ menu: NSMenu) {
@@ -1595,7 +1611,7 @@ final class IslandController: NSObject, IslandActions {
     @objc private func menuExportDeck() {
         collapse(waitForPointerToLeave: true)
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "QuickFolder Shortcuts.json"
+        panel.nameFieldStringValue = "TopDeck Shortcuts.json"
         panel.allowedContentTypes = [.json]
         NSApp.activate()
         if panel.runModal() == .OK, let url = panel.url,
@@ -1659,7 +1675,7 @@ final class IslandController: NSObject, IslandActions {
             guard let self else { return }
             switch status {
             case .upToDate:
-                self.showToast(Toast(symbol: "checkmark.circle.fill", text: "QuickFolder \(Updater.currentVersion) is up to date", url: nil))
+                self.showToast(Toast(symbol: "checkmark.circle.fill", text: "TopDeck \(Updater.currentVersion) is up to date", url: nil))
             case .installing(let version):
                 self.showToast(Toast(symbol: "arrow.down.circle.fill", text: "Installing \(version) when the island closes", url: nil))
             case .failed:
@@ -1720,7 +1736,7 @@ final class IslandController: NSObject, IslandActions {
                         // QF_DEBUG_FRONT=<bundle id> only presses the key if that app is in front.
                         if let required = env["QF_DEBUG_FRONT"],
                            NSWorkspace.shared.frontmostApplication?.bundleIdentifier != required {
-                            NSLog("QuickFolder debug: skipped key, %@ isn't in front", required)
+                            NSLog("TopDeck debug: skipped key, %@ isn't in front", required)
                             return
                         }
                         self.run(self.model.deckKeys[index])

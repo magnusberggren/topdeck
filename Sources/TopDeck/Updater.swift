@@ -1,9 +1,10 @@
 import AppKit
 import Security
+import ServiceManagement
 
-/// Keeps QuickFolder up to date from the repo's GitHub Releases.
+/// Keeps TopDeck up to date from the repo's GitHub Releases.
 ///
-/// Each release is tagged `v1.<build>` and carries `QuickFolder.zip`. A newer
+/// Each release is tagged `v1.<build>` and carries `TopDeck.zip`. A newer
 /// build is downloaded, checked to be signed by the same developer as this
 /// copy, swapped in place of the running app, and relaunched.
 final class Updater {
@@ -29,7 +30,7 @@ final class Updater {
     private var pending: (version: String, app: URL)?
 
     private static let repo = "magnusberggren/topdeck"
-    private static let assetName = "QuickFolder.zip"
+    private static let assetName = "TopDeck.zip"
     private static let interval: TimeInterval = 6 * 3600
     /// Only apps from this developer team are accepted as updates.
     private static let teamID = "AURJLA4GTL"
@@ -125,7 +126,7 @@ final class Updater {
     /// the signature before anything is trusted.
     private static func unpack(_ zip: URL) -> URL? {
         let fm = FileManager.default
-        let folder = fm.temporaryDirectory.appendingPathComponent("QuickFolder-update-\(UUID().uuidString)", isDirectory: true)
+        let folder = fm.temporaryDirectory.appendingPathComponent("TopDeck-update-\(UUID().uuidString)", isDirectory: true)
         try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
 
         let process = Process()
@@ -137,7 +138,7 @@ final class Updater {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { return nil }
 
-        let app = folder.appendingPathComponent("QuickFolder.app", isDirectory: true)
+        let app = folder.appendingPathComponent("TopDeck.app", isDirectory: true)
         return isTrusted(app) ? app : nil
     }
 
@@ -176,18 +177,58 @@ final class Updater {
         do {
             _ = try fm.replaceItemAt(target, withItemAt: app, backupItemName: nil, options: [])
         } catch {
-            NSLog("QuickFolder: update failed: \(error.localizedDescription)")
+            NSLog("TopDeck: update failed: \(error.localizedDescription)")
             pending = nil
             status = .failed
             return
         }
-        // A fresh process opens the new copy once this one has quit.
+        Self.relaunch(at: target)
+    }
+
+    /// Opens `app` from a fresh process once this one has quit.
+    static func relaunch(at app: URL) {
         let relaunch = Process()
         relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
-        relaunch.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", target.path]
+        relaunch.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", app.path]
         try? relaunch.run()
         NSApp.terminate(nil)
     }
+
+    // MARK: - Rename
+
+    /// The app was called QuickFolder before it became TopDeck. Copies from
+    /// then update into /Applications/QuickFolder.app; this renames that to
+    /// TopDeck.app and starts again from there, keeping Open at Login.
+    /// Returns true when the app is about to restart.
+    static func finishRename() -> Bool {
+        let current = Bundle.main.bundleURL
+        guard current.lastPathComponent == "QuickFolder.app" else { return false }
+        let target = current.deletingLastPathComponent().appendingPathComponent("TopDeck.app", isDirectory: true)
+        let fm = FileManager.default
+        let wasLoginItem = SMAppService.mainApp.status == .enabled
+        do {
+            // The copy that's running is the one that just updated, so it wins.
+            if fm.fileExists(atPath: target.path) { try fm.trashItem(at: target, resultingItemURL: nil) }
+            if wasLoginItem { try? SMAppService.mainApp.unregister() }
+            try fm.moveItem(at: current, to: target)
+        } catch {
+            NSLog("TopDeck: couldn’t rename QuickFolder.app: \(error.localizedDescription)")
+            if wasLoginItem { try? SMAppService.mainApp.register() }
+            return false
+        }
+        UserDefaults.standard.set(wasLoginItem, forKey: Self.reregisterKey)
+        relaunch(at: target)
+        return true
+    }
+
+    /// After the rename, Open at Login has to point at the new name.
+    static func restoreLoginItemAfterRename() {
+        guard UserDefaults.standard.object(forKey: reregisterKey) != nil else { return }
+        if UserDefaults.standard.bool(forKey: reregisterKey) { LoginItem.setEnabled(true) }
+        UserDefaults.standard.removeObject(forKey: reregisterKey)
+    }
+
+    private static let reregisterKey = "reregisterLoginItemAfterRename"
 
     // MARK: - GitHub
 

@@ -54,10 +54,19 @@ enum CloudSync {
         FileManager.default.fileExists(atPath: iCloudDrive.path)
     }
 
-    static var folder: URL { iCloudDrive.appendingPathComponent("QuickFolder", isDirectory: true) }
+    static var folder: URL { iCloudDrive.appendingPathComponent("TopDeck", isDirectory: true) }
+
+    /// Where the files lived when the app was called QuickFolder. Copied over
+    /// once; the originals stay for Macs that haven't updated yet.
+    static let moveFromOldName: Void = {
+        let fm = FileManager.default
+        let old = iCloudDrive.appendingPathComponent("QuickFolder", isDirectory: true)
+        guard !fm.fileExists(atPath: folder.path), fm.fileExists(atPath: old.path) else { return }
+        try? fm.copyItem(at: old, to: folder)
+    }()
 }
 
-/// One JSON file in iCloud Drive/QuickFolder, shared by every Mac signed in to
+/// One JSON file in iCloud Drive/TopDeck, shared by every Mac signed in to
 /// the same Apple ID. The newest change wins. Callbacks arrive on the main
 /// thread.
 final class CloudFile<Content: Equatable> {
@@ -84,7 +93,7 @@ final class CloudFile<Content: Equatable> {
         self.lastSyncKey = lastSyncKey
         self.encode = encode
         self.decode = decode
-        queue = DispatchQueue(label: "QuickFolder.CloudFile.\(name)", qos: .utility)
+        queue = DispatchQueue(label: "TopDeck.CloudFile.\(name)", qos: .utility)
     }
 
     /// When this Mac last wrote or read the file. nil until it first joins.
@@ -98,6 +107,7 @@ final class CloudFile<Content: Equatable> {
     /// that, the newer side wins.
     func start(local: Content, merge: @escaping (_ remote: Content, _ local: Content) -> Content) {
         queue.async { [self] in
+            _ = CloudSync.moveFromOldName
             try? FileManager.default.createDirectory(at: CloudSync.folder, withIntermediateDirectories: true)
             let remote = read()
 

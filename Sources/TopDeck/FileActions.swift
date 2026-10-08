@@ -169,7 +169,7 @@ enum Archive {
         let fm = FileManager.default
         let folder = archive.deletingLastPathComponent()
         // Hidden, so the folder watcher never sees half-extracted files.
-        let staging = folder.appendingPathComponent(".quickfolder-extract-\(UUID().uuidString)", isDirectory: true)
+        let staging = folder.appendingPathComponent(".topdeck-extract-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: staging, withIntermediateDirectories: false)
         defer { try? fm.removeItem(at: staging) }
 

@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "QuickFolder",
+    name: "TopDeck",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "QuickFolder",
-            path: "Sources/QuickFolder",
+            name: "TopDeck",
+            path: "Sources/TopDeck",
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .linkedFramework("QuickLookThumbnailing"),

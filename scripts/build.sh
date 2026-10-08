@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds build/QuickFolder.app.
+# Builds build/TopDeck.app.
 #   scripts/build.sh            release build
 #   CONFIG=debug scripts/build.sh
 #   SIGN_IDENTITY="-" scripts/build.sh   ad-hoc signing
@@ -7,14 +7,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="${CONFIG:-release}"
-APP="build/QuickFolder.app"
+APP="build/TopDeck.app"
 
 swift build -c "$CONFIG"
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN_DIR/QuickFolder" "$APP/Contents/MacOS/QuickFolder"
+cp "$BIN_DIR/TopDeck" "$APP/Contents/MacOS/TopDeck"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 # The build number is the commit count, so every build on main is newer than
@@ -53,6 +53,6 @@ fi
 # so only release packaging asks for one.
 TIMESTAMP_FLAG="--timestamp=none"
 [ "${TIMESTAMP:-0}" = "1" ] && TIMESTAMP_FLAG="--timestamp"
-codesign --force --options runtime $TIMESTAMP_FLAG --entitlements Resources/QuickFolder.entitlements --sign "$SIGN_IDENTITY" "$APP" >/dev/null
+codesign --force --options runtime $TIMESTAMP_FLAG --entitlements Resources/TopDeck.entitlements --sign "$SIGN_IDENTITY" "$APP" >/dev/null
 AUTHORITY="$(codesign -dvv "$APP" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
 echo "Built $APP (signed with: ${AUTHORITY:-ad-hoc})"

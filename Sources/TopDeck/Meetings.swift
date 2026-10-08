@@ -89,7 +89,7 @@ final class CalendarStore {
 
     private(set) var access: CalendarAccess
     private let store = EKEventStore()
-    private let queue = DispatchQueue(label: "QuickFolder.CalendarStore", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "TopDeck.CalendarStore", qos: .userInitiated)
     private var observer: NSObjectProtocol?
     private var refreshTimer: Timer?
 

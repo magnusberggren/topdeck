@@ -297,7 +297,7 @@ final class IslandModel {
     var busyItems: Set<String> = []
     /// The tile whose action button is under the pointer.
     var hoveredAction: String?
-    /// A file that just appeared because of something QuickFolder did; it glows briefly.
+    /// A file that just appeared because of something TopDeck did; it glows briefly.
     var highlightedID: String?
     /// Short messages shown in place of a tile's date, like "Couldn't extract".
     var tileNotes: [String: String] = [:]

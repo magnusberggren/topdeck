@@ -52,7 +52,7 @@ enum DiskImageInstaller {
 
     enum Failure: Error {
         case appRunning(String)
-        /// macOS blocks replacing other developers' apps until QuickFolder
+        /// macOS blocks replacing other developers' apps until TopDeck
         /// has App Management permission.
         case needsAppManagement
         case failed
