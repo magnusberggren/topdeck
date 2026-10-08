@@ -170,7 +170,7 @@ final class IslandController: NSObject, IslandActions {
     }
 
     func announceUpdateFailed(_ version: String) {
-        let page = URL(string: "https://github.com/magnusberggren/topdeck/releases/latest")
+        let page = Project.repository.appendingPathComponent("releases/latest")
         if model.state == .expanded {
             showToast(Toast(symbol: "exclamationmark.triangle.fill", text: "Couldn’t install \(version)", url: page, isWarning: true))
             return
@@ -1428,6 +1428,10 @@ final class IslandController: NSObject, IslandActions {
         menu.addItem(version)
 
         menu.addItem(.separator())
+        menu.addItem(menuItem("Contribute on GitHub…", symbol: "chevron.left.forwardslash.chevron.right", action: #selector(menuOpenGitHub)))
+        menu.addItem(menuItem("Report a Problem…", symbol: "ladybug", action: #selector(menuReportProblem)))
+
+        menu.addItem(.separator())
         let quit = menuItem("Quit TopDeck", action: #selector(menuQuit))
         quit.keyEquivalent = "q"
         menu.addItem(quit)
@@ -1711,7 +1715,7 @@ final class IslandController: NSObject, IslandActions {
                 self.showToast(Toast(
                     symbol: "exclamationmark.triangle.fill",
                     text: "Couldn’t check for updates",
-                    url: URL(string: "https://github.com/magnusberggren/topdeck/releases"),
+                    url: Project.repository.appendingPathComponent("releases"),
                     isWarning: true
                 ))
             case .idle, .checking:
@@ -1722,6 +1726,21 @@ final class IslandController: NSObject, IslandActions {
 
     @objc private func menuToggleLogin() {
         LoginItem.setEnabled(!LoginItem.isEnabled)
+    }
+
+    @objc private func menuOpenGitHub() {
+        collapse(waitForPointerToLeave: true)
+        NSWorkspace.shared.open(Project.repository)
+    }
+
+    /// Opens a new GitHub issue with the version, macOS and Mac filled in.
+    @objc private func menuReportProblem() {
+        collapse(waitForPointerToLeave: true)
+        NSWorkspace.shared.open(Project.newIssue(details: [
+            "TopDeck \(Updater.currentVersion)",
+            "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            model.metrics.hasNotch ? "display with a notch" : "display without a notch",
+        ]))
     }
 
     @objc private func menuQuit() {

@@ -21,6 +21,12 @@ the island closes (unless a call is about to start). ⋯ › Check for Updates�
 updates right away, and the menu shows which version you have. If an update
 can't go in, the notch says so. ⋯ › Update Automatically turns it off.
 
+## Contribute
+
+TopDeck is open source. Found a bug or have an idea? Use ⋯ › Report a
+Problem… in the app, or [open an issue](https://github.com/magnusberggren/topdeck/issues/new/choose).
+Want to change something yourself? See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Release
 
 ```bash
@@ -111,9 +117,10 @@ QF_DEBUG_RELEASE=file:///path/latest.json …   # try an update from a local rel
 swift scripts/make-icon.swift               # regenerate Resources/AppIcon.icns
 ```
 
-Builds are signed with the first Apple Development or Developer ID identity in
-your keychain, so macOS keeps the permissions across rebuilds. Set
-`SIGN_IDENTITY=-` for ad-hoc signing.
+Builds are signed with the newest Developer ID certificate in your keychain,
+else an Apple Development one, else ad-hoc, so macOS keeps the permissions
+across rebuilds. Set `SIGN_IDENTITY=-` to force ad-hoc signing. Only builds
+signed by the maintainer update themselves.
 
 ### Layout
 
