@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Updater.shared.canInstallNow = { [weak controller] in controller?.isIdle ?? true }
         Updater.shared.onInstall = { [weak controller] version in controller?.announceUpdate(to: version) }
+        Updater.shared.onFailure = { [weak controller] version in controller?.announceUpdateFailed(version) }
         Updater.shared.start()
 
         if !Preferences.hasLaunchedBefore {
@@ -33,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !Preferences.hasSetUpLoginItem, Bundle.main.bundlePath.hasPrefix("/Applications/") {
             Preferences.hasSetUpLoginItem = true
             LoginItem.setEnabled(true)
+        } else {
+            // Reinstalling or renaming the app can drop it from the login items.
+            LoginItem.repair()
         }
     }
 

@@ -147,19 +147,39 @@ final class IslandController: NSObject, IslandActions {
         #endif
     }
 
-    /// Nothing open, in progress, or about to start: a fine moment to restart for an update.
+    /// Nobody's using the island and no call is about to start: a fine
+    /// moment to restart for an update. Downloads in progress don't matter;
+    /// the browser keeps going and the wings come back after the restart.
     var isIdle: Bool {
         let now = Date()
         let callSoon = model.meetings.contains { $0.start.timeIntervalSince(now) < 180 && $0.start > now.addingTimeInterval(-60) }
-        return model.state == .collapsed && model.activities.isEmpty && !callSoon && !isMenuOpen
+        let isClosed = model.state == .collapsed || model.state == .activity
+        return isClosed && !callSoon && !isMenuOpen && !model.isDraggingFile
     }
 
     func announceUpdate(to version: String) {
+        if model.state == .expanded {
+            showToast(Toast(symbol: "arrow.down.circle.fill", text: "Restarting for TopDeck \(version)…", url: nil))
+            return
+        }
         showPeek(.message(
             title: "Updating TopDeck",
             subtitle: "Version \(version) · back in a second",
             symbol: "arrow.down.circle.fill"
         ), duration: 4)
+    }
+
+    func announceUpdateFailed(_ version: String) {
+        let page = URL(string: "https://github.com/magnusberggren/topdeck/releases/latest")
+        if model.state == .expanded {
+            showToast(Toast(symbol: "exclamationmark.triangle.fill", text: "Couldn’t install \(version)", url: page, isWarning: true))
+            return
+        }
+        showPeek(.message(
+            title: "Couldn’t update TopDeck",
+            subtitle: "Download \(version) from GitHub instead",
+            symbol: "exclamationmark.triangle.fill"
+        ), duration: 8)
     }
 
     func showWelcomeHint() {
@@ -843,6 +863,9 @@ final class IslandController: NSObject, IslandActions {
 
         panel.ignoresMouseEvents = (state == .collapsed || state == .activity) && !model.isDraggingFile
         withAnimation(animation) { model.state = state }
+        if state == .collapsed || state == .activity {
+            DispatchQueue.main.async { Updater.shared.islandSettled() }
+        }
     }
 
     private func expand() { setState(.expanded) }
@@ -1395,9 +1418,14 @@ final class IslandController: NSObject, IslandActions {
         let autoUpdate = menuItem("Update Automatically", action: #selector(menuToggleAutoUpdate))
         autoUpdate.state = Preferences.updatesAutomatically ? .on : .off
         menu.addItem(autoUpdate)
-        let check = menuItem("Check for Updates…", action: #selector(menuCheckForUpdates))
-        check.toolTip = "TopDeck \(Updater.currentVersion)"
-        menu.addItem(check)
+        if let version = Updater.shared.pendingVersion {
+            menu.addItem(menuItem("Restart to Update to \(version)", symbol: "arrow.down.circle", action: #selector(menuCheckForUpdates)))
+        } else {
+            menu.addItem(menuItem("Check for Updates…", action: #selector(menuCheckForUpdates)))
+        }
+        let version = NSMenuItem(title: "TopDeck \(Updater.currentVersion)", action: nil, keyEquivalent: "")
+        version.isEnabled = false
+        menu.addItem(version)
 
         menu.addItem(.separator())
         let quit = menuItem("Quit TopDeck", action: #selector(menuQuit))
@@ -1671,13 +1699,14 @@ final class IslandController: NSObject, IslandActions {
     @objc private func menuCheckForUpdates() {
         expand()
         showToast(Toast(symbol: "arrow.triangle.2.circlepath", text: "Checking for updates…", url: nil))
-        Updater.shared.check { [weak self] status in
+        // You asked, so a new version goes in right away instead of waiting.
+        Updater.shared.check(installRightAway: true) { [weak self] status in
             guard let self else { return }
             switch status {
             case .upToDate:
                 self.showToast(Toast(symbol: "checkmark.circle.fill", text: "TopDeck \(Updater.currentVersion) is up to date", url: nil))
-            case .installing(let version):
-                self.showToast(Toast(symbol: "arrow.down.circle.fill", text: "Installing \(version) when the island closes", url: nil))
+            case .installing:
+                break // announceUpdate says so a moment later
             case .failed:
                 self.showToast(Toast(
                     symbol: "exclamationmark.triangle.fill",

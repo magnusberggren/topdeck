@@ -24,10 +24,17 @@ final class Updater {
     /// Asked before installing; the update waits while this returns false
     /// (the island is open, or a call is about to start).
     var canInstallNow: (() -> Bool)?
+    /// Called on the main thread when a downloaded update couldn't be put in place.
+    var onFailure: ((String) -> Void)?
+
+    /// A downloaded update waiting for a quiet moment.
+    var pendingVersion: String? { pending?.version }
 
     private(set) var status: Status = .idle
     private var timer: Timer?
     private var pending: (version: String, app: URL)?
+    private var isInstalling = false
+    private var retry: DispatchWorkItem?
 
     private static let repo = "magnusberggren/topdeck"
     private static let assetName = "TopDeck.zip"
@@ -61,10 +68,12 @@ final class Updater {
         timer = nil
     }
 
-    func check(completion: ((Status) -> Void)? = nil) {
+    /// `installRightAway` is for Check for Updates…: the user asked, so a
+    /// found update restarts the app at once instead of waiting.
+    func check(installRightAway: Bool = false, completion: ((Status) -> Void)? = nil) {
         if let pending {
-            installWhenIdle(pending.version, app: pending.app)
             completion?(.installing(version: pending.version))
+            installRightAway ? installNow() : installWhenIdle()
             return
         }
         guard status != .checking else { return }
@@ -93,7 +102,7 @@ final class Updater {
                 self.finish(.upToDate, completion)
                 return
             }
-            self.download(asset.browserDownloadURL, version: release.version, completion: completion)
+            self.download(asset.browserDownloadURL, version: release.version, installRightAway: installRightAway, completion: completion)
         }.resume()
     }
 
@@ -106,7 +115,7 @@ final class Updater {
 
     // MARK: - Download
 
-    private func download(_ url: URL, version: String, completion: ((Status) -> Void)?) {
+    private func download(_ url: URL, version: String, installRightAway: Bool, completion: ((Status) -> Void)?) {
         URLSession.shared.downloadTask(with: url) { [weak self] file, _, _ in
             guard let self else { return }
             guard let file, let app = Self.unpack(file) else {
@@ -117,7 +126,7 @@ final class Updater {
                 self.pending = (version, app)
                 self.status = .installing(version: version)
                 completion?(.installing(version: version))
-                self.installWhenIdle(version, app: app)
+                installRightAway ? self.installNow() : self.installWhenIdle()
             }
         }.resume()
     }
@@ -157,21 +166,37 @@ final class Updater {
 
     // MARK: - Install
 
-    private func installWhenIdle(_ version: String, app: URL) {
+    /// The island has just closed: a downloaded update can go in now
+    /// rather than at the next 30-second retry.
+    func islandSettled() {
+        guard pending != nil else { return }
+        installWhenIdle()
+    }
+
+    private func installWhenIdle() {
+        guard pending != nil, !isInstalling else { return }
+        retry?.cancel()
         guard canInstallNow?() ?? true else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
-                self?.installWhenIdle(version, app: app)
-            }
+            let work = DispatchWorkItem { [weak self] in self?.installWhenIdle() }
+            retry = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: work)
             return
         }
-        onInstall?(version)
+        installNow()
+    }
+
+    func installNow() {
+        guard let pending, !isInstalling else { return }
+        isInstalling = true
+        retry?.cancel()
+        onInstall?(pending.version)
         // Let the island say so before it goes away for a second.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            self?.install(app)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.install(pending.app, version: pending.version)
         }
     }
 
-    private func install(_ app: URL) {
+    private func install(_ app: URL, version: String) {
         let fm = FileManager.default
         let target = Bundle.main.bundleURL
         do {
@@ -179,7 +204,9 @@ final class Updater {
         } catch {
             NSLog("TopDeck: update failed: \(error.localizedDescription)")
             pending = nil
+            isInstalling = false
             status = .failed
+            onFailure?(version)
             return
         }
         Self.relaunch(at: target)
