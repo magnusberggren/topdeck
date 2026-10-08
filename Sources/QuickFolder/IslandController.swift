@@ -144,6 +144,21 @@ final class IslandController: NSObject, IslandActions {
         #endif
     }
 
+    /// Nothing open, in progress, or about to start: a fine moment to restart for an update.
+    var isIdle: Bool {
+        let now = Date()
+        let callSoon = model.meetings.contains { $0.start.timeIntervalSince(now) < 180 && $0.start > now.addingTimeInterval(-60) }
+        return model.state == .collapsed && model.activities.isEmpty && !callSoon && !isMenuOpen
+    }
+
+    func announceUpdate(to version: String) {
+        showPeek(.message(
+            title: "Updating QuickFolder",
+            subtitle: "Version \(version) · back in a second",
+            symbol: "arrow.down.circle.fill"
+        ), duration: 4)
+    }
+
     func showWelcomeHint() {
         let place = model.metrics.hasNotch ? "the notch" : "the top of the screen"
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
@@ -1288,6 +1303,14 @@ final class IslandController: NSObject, IslandActions {
         menu.addItem(login)
 
         menu.addItem(.separator())
+        let autoUpdate = menuItem("Update Automatically", action: #selector(menuToggleAutoUpdate))
+        autoUpdate.state = Preferences.updatesAutomatically ? .on : .off
+        menu.addItem(autoUpdate)
+        let check = menuItem("Check for Updates…", action: #selector(menuCheckForUpdates))
+        check.toolTip = "QuickFolder \(Updater.currentVersion)"
+        menu.addItem(check)
+
+        menu.addItem(.separator())
         let quit = menuItem("Quit QuickFolder", action: #selector(menuQuit))
         quit.keyEquivalent = "q"
         menu.addItem(quit)
@@ -1550,6 +1573,34 @@ final class IslandController: NSObject, IslandActions {
 
     @objc private func menuTogglePreview() {
         Preferences.showsNewDownloadPreview.toggle()
+    }
+
+    @objc private func menuToggleAutoUpdate() {
+        Preferences.updatesAutomatically.toggle()
+        if Preferences.updatesAutomatically { Updater.shared.start() } else { Updater.shared.stop() }
+    }
+
+    @objc private func menuCheckForUpdates() {
+        expand()
+        showToast(Toast(symbol: "arrow.triangle.2.circlepath", text: "Checking for updates…", url: nil))
+        Updater.shared.check { [weak self] status in
+            guard let self else { return }
+            switch status {
+            case .upToDate:
+                self.showToast(Toast(symbol: "checkmark.circle.fill", text: "QuickFolder \(Updater.currentVersion) is up to date", url: nil))
+            case .installing(let version):
+                self.showToast(Toast(symbol: "arrow.down.circle.fill", text: "Installing \(version) when the island closes", url: nil))
+            case .failed:
+                self.showToast(Toast(
+                    symbol: "exclamationmark.triangle.fill",
+                    text: "Couldn’t check for updates",
+                    url: URL(string: "https://github.com/magnusberggren/topdeck/releases"),
+                    isWarning: true
+                ))
+            case .idle, .checking:
+                break
+            }
+        }
     }
 
     @objc private func menuToggleLogin() {

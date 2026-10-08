@@ -14,6 +14,7 @@ enum Preferences {
         static let hasSetUpLoginItem = "hasSetUpLoginItem"
         static let showsMeetingsPage = "showsMeetingsPage"
         static let remindsOfMeetings = "remindsOfMeetings"
+        static let updatesAutomatically = "updatesAutomatically"
         static let calendarOverrides = "calendarOverrides"
         static let displayID = "displayID"
         static let syncsShortcuts = "syncsShortcuts"
@@ -27,6 +28,7 @@ enum Preferences {
             Key.showsShortcutsPage: true,
             Key.showsMeetingsPage: true,
             Key.remindsOfMeetings: true,
+            Key.updatesAutomatically: true,
         ])
     }
 
@@ -48,6 +50,12 @@ enum Preferences {
     static var showsMeetingsPage: Bool {
         get { defaults.bool(forKey: Key.showsMeetingsPage) }
         set { defaults.set(newValue, forKey: Key.showsMeetingsPage) }
+    }
+
+    /// Download and install new releases from GitHub on its own.
+    static var updatesAutomatically: Bool {
+        get { defaults.bool(forKey: Key.updatesAutomatically) }
+        set { defaults.set(newValue, forKey: Key.updatesAutomatically) }
     }
 
     /// Pop a meeting out of the notch a minute before it starts.

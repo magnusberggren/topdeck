@@ -6,12 +6,29 @@ anywhere.
 
 ## Install
 
+On any Mac, no Xcode needed:
+
 ```bash
-scripts/install.sh
+curl -fL https://github.com/magnusberggren/topdeck/releases/latest/download/QuickFolder.zip -o /tmp/QuickFolder.zip \
+  && ditto -x -k /tmp/QuickFolder.zip /Applications && open /Applications/QuickFolder.app
 ```
 
-Builds a release app, copies it to `/Applications`, and launches it. The first
-launch turns on Open at Login.
+From source: `scripts/install.sh` builds a release app, copies it to
+`/Applications`, and launches it. The first launch turns on Open at Login.
+
+QuickFolder updates itself: every 6 hours it looks for a newer GitHub release,
+checks it's signed by the same developer, swaps it in and restarts, waiting
+until the island is closed and no call is about to start. ⋯ › Check for
+Updates… looks right away; ⋯ › Update Automatically turns it off.
+
+## Release
+
+```bash
+scripts/release.sh
+```
+
+From a clean, pushed `main`: builds, signs with your Developer ID, and publishes
+`v1.<commit count>` with `QuickFolder.zip` to GitHub Releases.
 
 ## Use
 
@@ -75,6 +92,7 @@ QF_DEBUG_STATE=peek     build/QuickFolder.app/Contents/MacOS/QuickFolder   # kee
 QF_DEBUG_STATE=meetingpeek …                   # the meeting reminder, with a sample call
 QF_DEBUG_STATE=expanded QF_DEBUG_MEETINGS=1 …  # Meetings page with sample calls, no Calendar access needed
 QF_DEBUG_FAKE_NOTCH=1 …                        # draw the island as on a display without a notch
+QF_DEBUG_RELEASE=file:///path/latest.json …   # try an update from a local release JSON
 swift scripts/make-icon.swift               # regenerate Resources/AppIcon.icns
 ```
 
@@ -88,6 +106,7 @@ your keychain, so macOS keeps the permissions across rebuilds. Set
 | --- | --- |
 | `Meetings.swift` | Upcoming video calls from Calendar, and which account to join as |
 | `DeckSync.swift` | Shortcuts file for iCloud Drive sync and export |
+| `Updater.swift` | Self-update from GitHub Releases, with a signature check |
 | `IslandController.swift` | Window, hover detection, open/peek/close state, scrolling, menus |
 | `IslandView.swift` | SwiftUI: the shape, shelf, tiles, and preview |
 | `IslandModel.swift` | State and all geometry, derived from the notch |

@@ -17,6 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.start()
         self.controller = controller
 
+        Updater.shared.canInstallNow = { [weak controller] in controller?.isIdle ?? true }
+        Updater.shared.onInstall = { [weak controller] version in controller?.announceUpdate(to: version) }
+        Updater.shared.start()
+
         if !Preferences.hasLaunchedBefore {
             Preferences.hasLaunchedBefore = true
             controller.showWelcomeHint()

@@ -16,6 +16,11 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/QuickFolder" "$APP/Contents/MacOS/QuickFolder"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+
+# The build number is the commit count, so every build on main is newer than
+# the last. The updater compares it with the release tag (v1.<build>).
+BUILD="${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" -c "Set :CFBundleShortVersionString 1.$BUILD" "$APP/Contents/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # A stable signing identity keeps the Downloads permission across rebuilds.
