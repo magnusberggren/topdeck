@@ -1,15 +1,15 @@
 #!/bin/bash
 # Builds the files a release ships, notarized by Apple so they open on any
 # Mac without warnings:
-#   build/release/QuickFolder.dmg   for people: open it, drag to Applications
-#   build/release/QuickFolder.zip   for the built-in updater
+#   build/release/TopDeck.dmg   for people: open it, drag to Applications
+#   build/release/TopDeck.zip   for the built-in updater
 # Needs a Developer ID certificate and the `notary` keychain profile:
 #   xcrun notarytool store-credentials notary --apple-id <Apple ID> --team-id <team>
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OUT="build/release"
-APP="build/QuickFolder.app"
+APP="build/TopDeck.app"
 PROFILE="${NOTARY_PROFILE:-notary}"
 
 TIMESTAMP=1 scripts/build.sh
@@ -32,19 +32,25 @@ ditto -c -k --keepParent "$APP" "$OUT/submit.zip"
 notarize "$OUT/submit.zip"
 xcrun stapler staple "$APP"
 rm "$OUT/submit.zip"
-ditto -c -k --keepParent "$APP" "$OUT/QuickFolder.zip"
+ditto -c -k --keepParent "$APP" "$OUT/TopDeck.zip"
+# Copies from before the rename look for QuickFolder.zip holding QuickFolder.app.
+# They install it under the old name, and it renames itself on first launch.
+LEGACY="$(mktemp -d)"
+cp -R "$APP" "$LEGACY/QuickFolder.app"
+ditto -c -k --keepParent "$LEGACY/QuickFolder.app" "$OUT/QuickFolder.zip"
+rm -rf "$LEGACY"
 
 # 2. The disk image: the app next to an Applications shortcut.
 STAGE="$(mktemp -d)"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "QuickFolder" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$OUT/QuickFolder.dmg" >/dev/null
+hdiutil create -volname "TopDeck" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$OUT/TopDeck.dmg" >/dev/null
 rm -rf "$STAGE"
-codesign --sign "$IDENTITY" --timestamp "$OUT/QuickFolder.dmg"
-notarize "$OUT/QuickFolder.dmg"
-xcrun stapler staple "$OUT/QuickFolder.dmg"
+codesign --sign "$IDENTITY" --timestamp "$OUT/TopDeck.dmg"
+notarize "$OUT/TopDeck.dmg"
+xcrun stapler staple "$OUT/TopDeck.dmg"
 
 # What Gatekeeper will say on someone else's Mac.
 spctl --assess --type execute "$APP"
-spctl --assess --type open --context context:primary-signature "$OUT/QuickFolder.dmg"
-echo "Ready: $OUT/QuickFolder.dmg and $OUT/QuickFolder.zip ($(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist"))"
+spctl --assess --type open --context context:primary-signature "$OUT/TopDeck.dmg"
+echo "Ready: $OUT/TopDeck.dmg and $OUT/TopDeck.zip ($(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist"))"

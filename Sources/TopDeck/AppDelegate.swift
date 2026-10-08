@@ -9,6 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        if Updater.finishRename() { return }
+        Updater.restoreLoginItemAfterRename()
+
         Preferences.registerDefaults()
         LoginItem.refresh()
         NSApp.mainMenu = Self.makeMainMenu()
@@ -33,14 +36,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Never shown, since QuickFolder has no menu bar, but its key equivalents
+    /// Never shown, since TopDeck has no menu bar, but its key equivalents
     /// are what make ⌘V, ⌘C, ⌘A and ⌘Z work in the shortcut editor.
     private static func makeMainMenu() -> NSMenu {
         let main = NSMenu()
 
         let app = NSMenu()
-        app.addItem(withTitle: "Quit QuickFolder", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        main.addItem(withTitle: "QuickFolder", action: nil, keyEquivalent: "").submenu = app
+        app.addItem(withTitle: "Quit TopDeck", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        main.addItem(withTitle: "TopDeck", action: nil, keyEquivalent: "").submenu = app
 
         let edit = NSMenu(title: "Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")

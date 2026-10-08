@@ -5,9 +5,9 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>QuickFolder</string>
+	<string>TopDeck</string>
 	<key>CFBundleExecutable</key>
-	<string>QuickFolder</string>
+	<string>TopDeck</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>QuickFolder</string>
+	<string>TopDeck</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -29,15 +29,15 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>QuickFolder asks Finder to open your downloads in column view.</string>
+	<string>TopDeck asks Finder to open your downloads in column view.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
-	<string>QuickFolder opens downloaded disk images to install the app inside.</string>
+	<string>TopDeck opens downloaded disk images to install the app inside.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>QuickFolder shows your upcoming video calls so you can join them as the right account.</string>
+	<string>TopDeck shows your upcoming video calls so you can join them as the right account.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>QuickFolder shows your upcoming video calls so you can join them as the right account.</string>
+	<string>TopDeck shows your upcoming video calls so you can join them as the right account.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>QuickFolder shows your latest downloads when you point at the notch.</string>
+	<string>TopDeck shows your latest downloads when you point at the notch.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

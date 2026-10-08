@@ -22,5 +22,5 @@ fi
 
 BUILD="$BUILD" scripts/package.sh
 
-gh release create "$TAG" build/release/QuickFolder.dmg build/release/QuickFolder.zip --target "$(git rev-parse HEAD)" --title "QuickFolder 1.$BUILD" --generate-notes
+gh release create "$TAG" build/release/TopDeck.dmg build/release/TopDeck.zip build/release/QuickFolder.zip --target "$(git rev-parse HEAD)" --title "TopDeck 1.$BUILD" --generate-notes
 echo "Released $TAG. Installed copies pick it up within 6 hours, or at once from ⋯ › Check for Updates…"

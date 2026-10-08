@@ -54,7 +54,7 @@ final class DownloadsMonitor {
     var onNewDownload: ((DownloadItem) -> Void)?
 
     private(set) var folder: URL
-    private let queue = DispatchQueue(label: "QuickFolder.DownloadsMonitor", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "TopDeck.DownloadsMonitor", qos: .userInitiated)
     private var source: DispatchSourceFileSystemObject?
     private var pendingScan: DispatchWorkItem?
     private var known: Set<String>?

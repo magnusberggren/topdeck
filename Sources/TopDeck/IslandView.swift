@@ -125,7 +125,7 @@ private struct PageContent: View {
         case .denied:
             CalendarAccessView(
                 model: model,
-                title: "QuickFolder can’t see your calendars",
+                title: "TopDeck can’t see your calendars",
                 detail: "Allow access in Privacy & Security › Calendars.",
                 button: "Open System Settings"
             )
@@ -727,7 +727,7 @@ private struct AccessDeniedView: View {
     var body: some View {
         let isHovered = model.hovered == .accessButton
         VStack(spacing: 6) {
-            Text("QuickFolder can’t see “\(model.folderName)”")
+            Text("TopDeck can’t see “\(model.folderName)”")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
             Text("Allow access in Privacy & Security › Files & Folders.")

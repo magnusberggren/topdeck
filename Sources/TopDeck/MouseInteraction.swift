@@ -4,7 +4,7 @@ import SwiftUI
 /// Hover, click, right-click and file dragging, done in AppKit.
 ///
 /// SwiftUI's own hover and gesture handling only works reliably in an active
-/// app, and the island never activates QuickFolder, so every interactive
+/// app, and the island never activates TopDeck, so every interactive
 /// element overlays one of these.
 struct MouseInteraction: NSViewRepresentable {
     let target: HoverTarget

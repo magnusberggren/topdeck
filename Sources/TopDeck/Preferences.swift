@@ -135,7 +135,7 @@ enum LoginItem {
     /// Asking ServiceManagement takes ~0.4s, far too slow for opening a menu,
     /// so the answer is cached and refreshed in the background.
     private(set) static var isEnabled = false
-    private static let queue = DispatchQueue(label: "QuickFolder.LoginItem")
+    private static let queue = DispatchQueue(label: "TopDeck.LoginItem")
 
     static func refresh() {
         queue.async {
@@ -156,7 +156,7 @@ enum LoginItem {
                     try SMAppService.mainApp.unregister()
                 }
             } catch {
-                NSLog("QuickFolder: could not update login item: \(error.localizedDescription)")
+                NSLog("TopDeck: could not update login item: \(error.localizedDescription)")
             }
             refresh()
         }
