@@ -22,7 +22,7 @@ fi
 
 BUILD="$BUILD" scripts/build.sh
 codesign --verify --strict --deep build/QuickFolder.app
-if ! codesign -dv build/QuickFolder.app 2>&1 | grep -q "Authority=Developer ID Application"; then
+if ! codesign -dvv build/QuickFolder.app 2>&1 | grep -q "Authority=Developer ID Application"; then
   echo "Not signed with a Developer ID certificate; other Macs won't accept it." >&2; exit 1
 fi
 
