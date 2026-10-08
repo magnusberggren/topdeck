@@ -43,6 +43,15 @@ enum PeekContent: Equatable {
     /// "Downloaded" for Downloads and "Added to Desktop" elsewhere.
     case download(DownloadItem, pageID: String, label: String)
     case message(title: String, subtitle: String, symbol: String)
+    /// A call about to start, clickable to join.
+    case meeting(Meeting)
+
+    /// Downloads and meetings are things to click or drag, so pointing at
+    /// them holds them up instead of opening the island.
+    var isInteractive: Bool {
+        if case .message = self { return false }
+        return true
+    }
 }
 
 enum HoverTarget: Hashable {

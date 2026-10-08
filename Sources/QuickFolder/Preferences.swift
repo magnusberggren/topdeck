@@ -13,6 +13,7 @@ enum Preferences {
         static let hasLaunchedBefore = "hasLaunchedBefore"
         static let hasSetUpLoginItem = "hasSetUpLoginItem"
         static let showsMeetingsPage = "showsMeetingsPage"
+        static let remindsOfMeetings = "remindsOfMeetings"
         static let calendarOverrides = "calendarOverrides"
         static let displayID = "displayID"
         static let syncsShortcuts = "syncsShortcuts"
@@ -25,6 +26,7 @@ enum Preferences {
             Key.hapticsEnabled: true,
             Key.showsShortcutsPage: true,
             Key.showsMeetingsPage: true,
+            Key.remindsOfMeetings: true,
         ])
     }
 
@@ -46,6 +48,12 @@ enum Preferences {
     static var showsMeetingsPage: Bool {
         get { defaults.bool(forKey: Key.showsMeetingsPage) }
         set { defaults.set(newValue, forKey: Key.showsMeetingsPage) }
+    }
+
+    /// Pop a meeting out of the notch a minute before it starts.
+    static var remindsOfMeetings: Bool {
+        get { defaults.bool(forKey: Key.remindsOfMeetings) }
+        set { defaults.set(newValue, forKey: Key.remindsOfMeetings) }
     }
 
     /// Calendars the user showed or hid on the Meetings page, by calendar id.

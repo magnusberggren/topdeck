@@ -15,6 +15,11 @@ final class IslandController: NSObject, IslandActions {
     private var expandTimer: Timer?
     private var collapseTimer: Timer?
     private var peekTimer: Timer?
+    /// When the current preview goes away if nobody points at it.
+    private var peekDeadline = Date.distantPast
+    private var reminderTimer: Timer?
+    /// Meetings already announced, by id, so each pops out once.
+    private var remindedMeetings: Set<String> = []
 
     private var isMenuOpen = false
     /// The pointer is on a download preview, so it stays up until it leaves.
@@ -71,6 +76,10 @@ final class IslandController: NSObject, IslandActions {
         static let peekDuration: TimeInterval = 4.2
         /// How long a preview stays after the pointer moves off it.
         static let peekLinger: TimeInterval = 1.2
+        /// Meeting reminders pop out this long before the start…
+        static let reminderLead: TimeInterval = 60
+        /// …and still do if the Mac wakes up this long after it.
+        static let reminderGrace: TimeInterval = 120
         /// Reopening after this long starts back on the first folder.
         static let pageMemory: TimeInterval = 30
     }
@@ -117,6 +126,7 @@ final class IslandController: NSObject, IslandActions {
             withAnimation(isVisible ? .spring(response: 0.42, dampingFraction: 0.84) : nil) {
                 self.model.meetings = meetings
             }
+            self.scheduleReminder()
         }
         calendar.refresh()
         progressWatcher.onChange = { [weak self] downloads in
@@ -536,6 +546,7 @@ final class IslandController: NSObject, IslandActions {
     }
 
     func showMenu(for meeting: Meeting) {
+        if model.state == .peek { expand() }
         let menu = NSMenu()
         let join = menuItem(
             meeting.account.map { "Join as \($0)" } ?? "Join",
@@ -717,6 +728,9 @@ final class IslandController: NSObject, IslandActions {
                let index = model.pages.firstIndex(where: { $0.id == pageID }) {
                 // Open on the folder the preview was about.
                 model.pageIndex = index
+            } else if model.state == .peek, case .meeting = model.peek,
+                      let index = model.pages.firstIndex(where: { $0.kind == .meetings }) {
+                model.pageIndex = index
             } else if Date().timeIntervalSince(collapsedAt) > Timing.pageMemory {
                 model.pageIndex = 0
             }
@@ -756,6 +770,7 @@ final class IslandController: NSObject, IslandActions {
         model.peek = content
         setState(.peek)
         isHoldingPeek = false
+        peekDeadline = Date().addingTimeInterval(duration)
         schedulePeekEnd(after: duration)
         updatePeekHold()
     }
@@ -768,10 +783,11 @@ final class IslandController: NSObject, IslandActions {
         }
     }
 
-    /// A download preview is something to click or drag out, so it stays up
-    /// while the pointer is on it and lingers briefly once it leaves.
+    /// A download or meeting preview is something to click or drag, so it
+    /// stays up while the pointer is on it. Once the pointer leaves it keeps
+    /// its original time, or lingers briefly if that has passed.
     private func updatePeekHold() {
-        guard model.state == .peek, case .download = model.peek else { return }
+        guard model.state == .peek, model.peek?.isInteractive == true else { return }
         let point = NSEvent.mouseLocation
         let hold = model.isDraggingFile
             || model.metrics.screenRect(for: .peek).contains(point)
@@ -781,8 +797,53 @@ final class IslandController: NSObject, IslandActions {
         if hold {
             peekTimer?.invalidate(); peekTimer = nil
         } else {
-            schedulePeekEnd(after: Timing.peekLinger)
+            schedulePeekEnd(after: max(Timing.peekLinger, peekDeadline.timeIntervalSinceNow))
         }
+    }
+
+    // MARK: - Meeting reminders
+
+    /// Sets a timer for the next meeting's reminder. Runs again whenever the
+    /// calendar changes, which it does at least every minute.
+    private func scheduleReminder() {
+        reminderTimer?.invalidate(); reminderTimer = nil
+        guard Preferences.remindsOfMeetings else { return }
+        let now = Date()
+        let upcoming = model.meetings
+            .filter { !remindedMeetings.contains($0.id) && now.timeIntervalSince($0.start) < Timing.reminderGrace }
+            .min { $0.start < $1.start }
+        guard let next = upcoming else { return }
+        let fireIn = next.start.addingTimeInterval(-Timing.reminderLead).timeIntervalSince(now)
+        if fireIn <= 0 {
+            remind(of: next)
+            return
+        }
+        reminderTimer = Timer.scheduledTimer(withTimeInterval: fireIn, repeats: false) { [weak self] _ in
+            self?.remind(of: next)
+        }
+        reminderTimer?.tolerance = 1
+    }
+
+    private func remind(of meeting: Meeting) {
+        remindedMeetings.insert(meeting.id)
+        // Calls the calendar has since dropped or moved shouldn't pop up, nor
+        // ones long started by the time a sleeping Mac wakes.
+        if let current = model.meetings.first(where: { $0.id == meeting.id }),
+           -current.start.timeIntervalSinceNow < Timing.reminderGrace {
+            Haptics.perform(.levelChange)
+            if model.state == .expanded {
+                showToast(Toast(
+                    symbol: "video.fill",
+                    text: "\(current.title) starts \(current.start <= Date() ? "now" : "in 1 min")",
+                    url: current.joinURL(as: current.account)
+                ))
+            } else {
+                // Up until a minute after it starts, unless dismissed sooner.
+                let duration = max(current.start.timeIntervalSinceNow + 60, 30)
+                showPeek(.meeting(current), duration: duration)
+            }
+        }
+        scheduleReminder()
     }
 
     private func cancelTimers() {
@@ -842,7 +903,7 @@ final class IslandController: NSObject, IslandActions {
         case .peek:
             let rect: CGRect
             let delay: TimeInterval
-            if case .download = model.peek {
+            if model.peek?.isInteractive == true {
                 // Pointing at the file leaves it grabbable; the notch itself
                 // still opens the shelf.
                 updatePeekHold()
@@ -1192,6 +1253,9 @@ final class IslandController: NSObject, IslandActions {
         case .meetings where calendar.access == .granted:
             menu.addItem(.sectionHeader(title: "Meetings"))
             menu.addItem(calendarsMenuItem())
+            let remind = menuItem("Remind 1 Minute Before", symbol: "bell", action: #selector(menuToggleReminders))
+            remind.state = Preferences.remindsOfMeetings ? .on : .off
+            menu.addItem(remind)
             menu.addItem(.separator())
         case .shortcuts:
             menu.addItem(.sectionHeader(title: "Shortcuts"))
@@ -1403,6 +1467,11 @@ final class IslandController: NSObject, IslandActions {
         if Preferences.showsMeetingsPage { calendar.refresh() }
     }
 
+    @objc private func menuToggleReminders() {
+        Preferences.remindsOfMeetings.toggle()
+        scheduleReminder()
+    }
+
     @objc private func menuToggleCalendar(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         var overrides = Preferences.calendarOverrides
@@ -1494,7 +1563,7 @@ final class IslandController: NSObject, IslandActions {
     // MARK: - Debug
 
     #if DEBUG
-    /// `QF_DEBUG_STATE=expanded|peek` pins the island open for screenshots.
+    /// `QF_DEBUG_STATE=expanded|peek|meetingpeek` pins the island open for screenshots.
     /// With `expanded`: `QF_DEBUG_PAGE=n` opens page n, `QF_DEBUG_ACTIONS`
     /// runs every smart action, `QF_DEBUG_RUNKEY=n` presses deck key n,
     /// `QF_DEBUG_EDITOR` opens the key editor, `QF_DEBUG_ARRANGE` opens Arrange
@@ -1504,6 +1573,13 @@ final class IslandController: NSObject, IslandActions {
         guard let value = ProcessInfo.processInfo.environment["QF_DEBUG_STATE"] else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
             switch value {
+            case "meetingpeek":
+                // A meeting reminder with a sample call starting in a minute.
+                if var meeting = Meeting.samples.dropFirst().first {
+                    meeting.start = Date().addingTimeInterval(55)
+                    showPeek(.meeting(meeting), duration: 3600)
+                }
+                pinnedState = .peek
             case "peek":
                 if let page = model.currentPage, let item = page.items.first {
                     showPeek(.download(item, pageID: page.id, label: "Downloaded"), duration: 3600)

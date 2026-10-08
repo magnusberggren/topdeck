@@ -1203,6 +1203,8 @@ private struct PeekView: View {
                     DownloadPeek(item: item, label: label, model: model)
                 case .message(let title, let subtitle, let symbol):
                     MessagePeek(title: title, subtitle: subtitle, symbol: symbol)
+                case .meeting(let meeting):
+                    MeetingPeek(meeting: meeting, model: model)
                 case nil:
                     Color.clear
                 }
@@ -1275,6 +1277,75 @@ private struct DownloadPeek: View {
     private var subtitle: String {
         guard let size = item.size else { return label }
         return "\(label) · " + ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+}
+
+/// A call about to start. The whole thing joins it.
+private struct MeetingPeek: View {
+    let meeting: Meeting
+    let model: IslandModel
+
+    private static let green = Color(red: 0.2, green: 0.78, blue: 0.35)
+
+    var body: some View {
+        let isHovered = model.hovered == .peek
+        let isPressed = model.pressed == .peek
+
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            HStack(spacing: 11) {
+                DeckKeyFace(symbol: "video.fill", color: meeting.color, size: 34)
+                    .scaleEffect(isPressed ? 0.92 : (isHovered ? 1.08 : 1))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(meeting.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(subtitle(now: context.date))
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Text("Join")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(height: 26)
+                    .background(Capsule().fill(Self.green.opacity(isHovered ? 1 : 0.85)))
+                    .scaleEffect(isPressed ? 0.92 : 1)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(isHovered ? 0.08 : 0)))
+        .padding(.horizontal, -6)
+        .animation(.smooth(duration: 0.18), value: isHovered)
+        .animation(.spring(response: 0.22, dampingFraction: 0.6), value: isPressed)
+        .contentShape(Rectangle())
+        .overlay {
+            if model.state == .peek {
+                MouseInteraction(
+                    target: .peek,
+                    model: model,
+                    onClick: { model.actions?.join(meeting, as: meeting.account) },
+                    onRightClick: { model.actions?.showMenu(for: meeting) }
+                )
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(meeting.title), join")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func subtitle(now: Date) -> String {
+        let seconds = meeting.start.timeIntervalSince(now)
+        let when = seconds > 30 ? "Starts in 1 min" : seconds > -60 ? "Starting now" : "Started \(Int(-seconds / 60)) min ago"
+        guard let account = meeting.account else { return when }
+        return when + " · " + Meeting.shortAccount(account)
     }
 }
 

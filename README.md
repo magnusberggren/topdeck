@@ -19,7 +19,7 @@ launch turns on Open at Login.
 - **Click** a file to open it.
 - **Drag** a file out to move it, like dragging out of Finder. Hold Option to copy. The island gets out of the way as soon as the file leaves it.
 - **New-file preview:** when a file lands, the notch shows it for a few seconds. Point at the preview to keep it up, then click to open it or drag it straight out. Point at the notch itself to open the full shelf.
-- **Meetings page:** your upcoming video calls (Google Meet, Zoom, Teams and more) from every account in the Calendar app. Click one to join. Google Meet opens as the account that was invited, so you never have to switch accounts in the browser. Right-click for Join As, Copy Link and Show in Calendar. Only your own calendars count by default, not ones colleagues share with you; change that under ⋯ › Calendars. Add your Google accounts in System Settings › Internet Accounts if they aren't in Calendar yet.
+- **Meetings page:** your upcoming video calls (Google Meet, Zoom, Teams and more) from every account in the Calendar app. Click one to join. Google Meet opens as the account that was invited, so you never have to switch accounts in the browser. Right-click for Join As, Copy Link and Show in Calendar. A minute before a call starts it pops out of the notch with a Join button; turn that off under ⋯ › Remind 1 Minute Before on the Meetings page. Only your own calendars count by default, not ones colleagues share with you; change that under ⋯ › Calendars. Add your Google accounts in System Settings › Internet Accounts if they aren't in Calendar yet.
 - **Any display:** ⋯ › Show On puts the island on the display you choose. Displays without a notch (like a Mac Studio's) get a drawn notch at the top center, always visible.
 - **Shortcuts everywhere:** on the Shortcuts page, ⋯ › Sync with iCloud keeps your shortcuts the same on every Mac signed in to your Apple ID, through iCloud Drive. Export Shortcuts… and Import Shortcuts… share them as a file.
 - **Right-click** for Open With, Show in Finder, Quick Look, Copy and Move to Trash.
@@ -72,6 +72,7 @@ QF_DEBUG_STATE=expanded build/QuickFolder.app/Contents/MacOS/QuickFolder   # kee
 QF_DEBUG_STATE=expanded QF_DEBUG_PAGE=1 build/QuickFolder.app/Contents/MacOS/QuickFolder   # open on the second folder
 QF_DEBUG_STATE=expanded QF_DEBUG_ACTIONS=1 …   # also: QF_DEBUG_RUNKEY=n (+ QF_DEBUG_FRONT=<bundle id>), QF_DEBUG_EDITOR, QF_DEBUG_ARRANGE, QF_DEBUG_CONFIRM, QF_DEBUG_MENU
 QF_DEBUG_STATE=peek     build/QuickFolder.app/Contents/MacOS/QuickFolder   # keep the new-download preview open
+QF_DEBUG_STATE=meetingpeek …                   # the meeting reminder, with a sample call
 QF_DEBUG_STATE=expanded QF_DEBUG_MEETINGS=1 …  # Meetings page with sample calls, no Calendar access needed
 QF_DEBUG_FAKE_NOTCH=1 …                        # draw the island as on a display without a notch
 swift scripts/make-icon.swift               # regenerate Resources/AppIcon.icns
