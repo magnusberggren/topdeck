@@ -16,6 +16,7 @@ enum Preferences {
         static let remindsOfMeetings = "remindsOfMeetings"
         static let updatesAutomatically = "updatesAutomatically"
         static let wantsOpenAtLogin = "wantsOpenAtLogin"
+        static let loginItemPath = "loginItemPath"
         static let calendarOverrides = "calendarOverrides"
         static let displayID = "displayID"
         static let syncsWithiCloud = "syncsWithiCloud"
@@ -58,6 +59,12 @@ enum Preferences {
     static var wantsOpenAtLogin: Bool {
         get { defaults.bool(forKey: Key.wantsOpenAtLogin) }
         set { defaults.set(newValue, forKey: Key.wantsOpenAtLogin) }
+    }
+
+    /// Where the app was when it last added itself to the login items.
+    static var loginItemPath: String? {
+        get { defaults.string(forKey: Key.loginItemPath) }
+        set { defaults.set(newValue, forKey: Key.loginItemPath) }
     }
 
     /// Download and install new releases from GitHub on its own.
@@ -152,13 +159,21 @@ enum LoginItem {
         }
     }
 
-    /// Puts the app back in the login items if it fell out (a reinstall or
-    /// the rename from QuickFolder) while you still want it there. Leaves it
-    /// alone if you switched it off, here or in System Settings.
+    /// Puts the app back in the login items if it fell out because the app
+    /// moved (a reinstall, or the rename from QuickFolder) while you still
+    /// want it there. If you remove it in System Settings without moving the
+    /// app, it stays removed.
     static func repair() {
-        guard Bundle.main.bundlePath.hasPrefix("/Applications/"), Preferences.wantsOpenAtLogin else { return }
+        let path = Bundle.main.bundlePath
+        guard path.hasPrefix("/Applications/"), Preferences.wantsOpenAtLogin,
+              Preferences.loginItemPath != path else { return }
         queue.async {
-            guard SMAppService.mainApp.status == .notRegistered else { return }
+            // Removed items read as "not found" rather than "not registered".
+            let status = SMAppService.mainApp.status
+            guard status == .notRegistered || status == .notFound else {
+                DispatchQueue.main.async { Preferences.loginItemPath = path }
+                return
+            }
             DispatchQueue.main.async { setEnabled(true) }
         }
     }
@@ -168,6 +183,7 @@ enum LoginItem {
         guard Bundle.main.bundleURL.pathExtension == "app" else { return }
         isEnabled = enabled
         Preferences.wantsOpenAtLogin = enabled
+        Preferences.loginItemPath = enabled ? Bundle.main.bundlePath : nil
         queue.async {
             do {
                 if enabled {
