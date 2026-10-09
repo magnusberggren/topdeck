@@ -18,6 +18,8 @@ enum Preferences {
         static let wantsOpenAtLogin = "wantsOpenAtLogin"
         static let loginItemPath = "loginItemPath"
         static let calendarOverrides = "calendarOverrides"
+        static let accountChoices = "accountChoices"
+        static let addedAccounts = "addedAccounts"
         static let displayID = "displayID"
         static let syncsWithiCloud = "syncsWithiCloud"
     }
@@ -84,6 +86,18 @@ enum Preferences {
     static var calendarOverrides: [String: Bool] {
         get { defaults.dictionary(forKey: Key.calendarOverrides) as? [String: Bool] ?? [:] }
         set { defaults.set(newValue, forKey: Key.calendarOverrides) }
+    }
+
+    /// Google accounts shown or hidden on the Meetings page, by address.
+    static var accountChoices: [String: Bool] {
+        get { defaults.dictionary(forKey: Key.accountChoices) as? [String: Bool] ?? [:] }
+        set { defaults.set(newValue, forKey: Key.accountChoices) }
+    }
+
+    /// Google accounts added by hand, for ones the Calendar app doesn't know.
+    static var addedAccounts: [String] {
+        get { defaults.stringArray(forKey: Key.addedAccounts) ?? [] }
+        set { defaults.set(newValue, forKey: Key.addedAccounts) }
     }
 
     /// The display the island lives on, by its UUID. nil picks the built-in
@@ -213,6 +227,8 @@ struct SyncedSettings: Codable, Equatable {
     var remindsOfMeetings: Bool
     var updatesAutomatically: Bool
     var calendarOverrides: [String: Bool]
+    var accountChoices: [String: Bool] = [:]
+    var addedAccounts: [String] = []
 
     static func current() -> SyncedSettings {
         SyncedSettings(
@@ -225,7 +241,9 @@ struct SyncedSettings: Codable, Equatable {
             remindsOfMeetings: Preferences.remindsOfMeetings,
             updatesAutomatically: Preferences.updatesAutomatically,
             // Only calendars that can be recognized on another Mac.
-            calendarOverrides: Preferences.calendarOverrides.filter { $0.key.contains("|") }
+            calendarOverrides: Preferences.calendarOverrides.filter { $0.key.contains("|") },
+            accountChoices: Preferences.accountChoices,
+            addedAccounts: Preferences.addedAccounts
         )
     }
 
@@ -239,6 +257,50 @@ struct SyncedSettings: Codable, Equatable {
         Preferences.remindsOfMeetings = remindsOfMeetings
         Preferences.updatesAutomatically = updatesAutomatically
         Preferences.calendarOverrides = calendarOverrides
+        Preferences.accountChoices = accountChoices
+        Preferences.addedAccounts = addedAccounts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case folders, pageOrder, showsShortcutsPage, showsMeetingsPage, showsNewDownloadPreview
+        case hapticsEnabled, remindsOfMeetings, updatesAutomatically, calendarOverrides
+        case accountChoices, addedAccounts
+    }
+
+    init(
+        folders: [String], pageOrder: [String], showsShortcutsPage: Bool, showsMeetingsPage: Bool,
+        showsNewDownloadPreview: Bool, hapticsEnabled: Bool, remindsOfMeetings: Bool,
+        updatesAutomatically: Bool, calendarOverrides: [String: Bool],
+        accountChoices: [String: Bool], addedAccounts: [String]
+    ) {
+        self.folders = folders
+        self.pageOrder = pageOrder
+        self.showsShortcutsPage = showsShortcutsPage
+        self.showsMeetingsPage = showsMeetingsPage
+        self.showsNewDownloadPreview = showsNewDownloadPreview
+        self.hapticsEnabled = hapticsEnabled
+        self.remindsOfMeetings = remindsOfMeetings
+        self.updatesAutomatically = updatesAutomatically
+        self.calendarOverrides = calendarOverrides
+        self.accountChoices = accountChoices
+        self.addedAccounts = addedAccounts
+    }
+
+    /// Settings files from older versions lack the newer fields; those
+    /// start out empty instead of making the whole file unreadable.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        folders = try c.decode([String].self, forKey: .folders)
+        pageOrder = try c.decode([String].self, forKey: .pageOrder)
+        showsShortcutsPage = try c.decode(Bool.self, forKey: .showsShortcutsPage)
+        showsMeetingsPage = try c.decode(Bool.self, forKey: .showsMeetingsPage)
+        showsNewDownloadPreview = try c.decode(Bool.self, forKey: .showsNewDownloadPreview)
+        hapticsEnabled = try c.decode(Bool.self, forKey: .hapticsEnabled)
+        remindsOfMeetings = try c.decode(Bool.self, forKey: .remindsOfMeetings)
+        updatesAutomatically = try c.decode(Bool.self, forKey: .updatesAutomatically)
+        calendarOverrides = try c.decode([String: Bool].self, forKey: .calendarOverrides)
+        accountChoices = try c.decodeIfPresent([String: Bool].self, forKey: .accountChoices) ?? [:]
+        addedAccounts = try c.decodeIfPresent([String].self, forKey: .addedAccounts) ?? []
     }
 
     private static func portable(_ path: String) -> String {

@@ -68,6 +68,8 @@ final class IslandController: NSObject, IslandActions {
     private var syncCheckTimer: Timer?
     private let calendar = CalendarStore()
     private let googleIcons = GoogleIcons()
+    /// Every Google account found or added, for the Google Accounts menu.
+    private var accountChoices: [AccountChoice] = []
     private var toastTimer: Timer?
     private var cleanupConfirmTimer: Timer?
 
@@ -132,11 +134,16 @@ final class IslandController: NSObject, IslandActions {
             }
             self.scheduleReminder()
         }
-        calendar.onAccounts = { [weak self] accounts in
+        calendar.onAccounts = { [weak self] choices in
             guard let self else { return }
-            if !accounts.isEmpty { self.googleIcons.load() }
-            guard accounts != self.model.googleAccounts else { return }
-            self.model.googleAccounts = accounts
+            self.accountChoices = choices
+            let shown = choices.filter(\.isShown).map(\.account)
+            if !shown.isEmpty { self.googleIcons.load() }
+            guard shown != self.model.googleAccounts else { return }
+            let isVisible = self.model.state == .expanded && self.model.currentPage?.kind == .meetings
+            withAnimation(isVisible ? .spring(response: 0.42, dampingFraction: 0.84) : nil) {
+                self.model.googleAccounts = shown
+            }
         }
         googleIcons.onLoad = { [weak self] product, image in
             self?.model.googleIcons[product] = image
@@ -1395,6 +1402,7 @@ final class IslandController: NSObject, IslandActions {
         case .meetings where calendar.access == .granted:
             menu.addItem(.sectionHeader(title: "Meetings"))
             menu.addItem(calendarsMenuItem())
+            menu.addItem(accountsMenuItem())
             let remind = menuItem("Remind 1 Minute Before", symbol: "bell", action: #selector(menuToggleReminders))
             remind.state = Preferences.remindsOfMeetings ? .on : .off
             menu.addItem(remind)
@@ -1481,6 +1489,49 @@ final class IslandController: NSObject, IslandActions {
             NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5)).fill()
             return true
         }
+    }
+
+    /// Which Google accounts get Calendar and Drive tiles: the ones on this
+    /// Mac, other addresses found in your calendars, and ones you added.
+    private func accountsMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Google Accounts", action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: "person.2.circle", accessibilityDescription: nil)
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        let sections: [(AccountChoice.Source, String)] = [
+            (.calendarAccount, "On This Mac"),
+            (.sharedCalendar, "Other Addresses in Your Calendars"),
+            (.added, "Added by You"),
+        ]
+        for (source, title) in sections {
+            let choices = accountChoices.filter { $0.source == source }
+            guard !choices.isEmpty else { continue }
+            submenu.addItem(.sectionHeader(title: title))
+            for choice in choices {
+                let entry = menuItem(choice.account.email, action: #selector(menuToggleAccount(_:)))
+                entry.representedObject = choice.account.email
+                entry.state = choice.isShown ? .on : .off
+                entry.image = Self.swatch(choice.account.color.nsColor)
+                submenu.addItem(entry)
+            }
+        }
+        if !submenu.items.isEmpty { submenu.addItem(.separator()) }
+        submenu.addItem(menuItem("Add Account…", symbol: "plus", action: #selector(menuAddAccount)))
+        let added = accountChoices.filter { $0.source == .added }
+        if !added.isEmpty {
+            let remove = NSMenuItem(title: "Remove", action: nil, keyEquivalent: "")
+            remove.image = NSImage(systemSymbolName: "minus", accessibilityDescription: nil)
+            let removeMenu = NSMenu()
+            for choice in added {
+                let entry = menuItem(choice.account.email, action: #selector(menuRemoveAccount(_:)))
+                entry.representedObject = choice.account.email
+                removeMenu.addItem(entry)
+            }
+            remove.submenu = removeMenu
+            submenu.addItem(remove)
+        }
+        item.submenu = submenu
+        return item
     }
 
     /// Which display the island lives on. Displays without a notch get a
@@ -1630,6 +1681,51 @@ final class IslandController: NSObject, IslandActions {
     @objc private func menuToggleReminders() {
         Preferences.remindsOfMeetings.toggle()
         scheduleReminder()
+    }
+
+    @objc private func menuToggleAccount(_ sender: NSMenuItem) {
+        guard let email = sender.representedObject as? String else { return }
+        var choices = Preferences.accountChoices
+        choices[email] = sender.state != .on
+        Preferences.accountChoices = choices
+        calendar.refresh()
+    }
+
+    /// For Google accounts the Calendar app doesn't know about.
+    @objc private func menuAddAccount() {
+        collapse(waitForPointerToLeave: true)
+        let alert = NSAlert()
+        alert.messageText = "Add a Google Account"
+        alert.informativeText = "Its Calendar and Drive open on this account. You need to be signed in to it in your browser."
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = "name@gmail.com"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        NSApp.activate()
+        defer { NSApp.deactivate() }
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let email = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard CalendarStore.looksLikeEmail(email) else {
+            NSSound.beep()
+            return
+        }
+        if !Preferences.addedAccounts.contains(email) { Preferences.addedAccounts.append(email) }
+        var choices = Preferences.accountChoices
+        choices[email] = true
+        Preferences.accountChoices = choices
+        calendar.refresh()
+    }
+
+    @objc private func menuRemoveAccount(_ sender: NSMenuItem) {
+        guard let email = sender.representedObject as? String else { return }
+        Preferences.addedAccounts.removeAll { $0 == email }
+        var choices = Preferences.accountChoices
+        choices[email] = nil
+        Preferences.accountChoices = choices
+        calendar.refresh()
     }
 
     @objc private func menuToggleCalendar(_ sender: NSMenuItem) {
