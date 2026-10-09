@@ -65,6 +65,23 @@ extension Meeting {
 }
 #endif
 
+/// One of your Google accounts, with a color to tell it apart.
+struct GoogleAccount: Identifiable, Equatable {
+    let email: String
+    var color: DeckColor
+
+    var id: String { email }
+    /// "shuuto.no", which tells several "magnus@" accounts apart.
+    var label: String { Meeting.shortAccount(email) }
+    /// "S" for shuuto.no, like the letter in a Google profile picture.
+    var initial: String { label.first.map { String($0).uppercased() } ?? "?" }
+
+    /// Colors to fall back on when two accounts' calendars look alike.
+    static let palette: [DeckColor] = [.blue, .orange, .purple, .teal, .pink, .green, .yellow, .red, .indigo]
+
+    var links: [AccountLink] { AccountLink.Kind.allCases.map { AccountLink(kind: $0, account: email) } }
+}
+
 /// Google Calendar or Drive, opened as one particular account.
 struct AccountLink: Identifiable, Equatable {
     enum Kind: CaseIterable { case calendar, drive }
@@ -114,10 +131,6 @@ struct AccountLink: Identifiable, Equatable {
         return components.url!
     }
 
-    /// Calendar and Drive for each account, account by account.
-    static func all(for accounts: [String]) -> [AccountLink] {
-        accounts.flatMap { account in Kind.allCases.map { AccountLink(kind: $0, account: account) } }
-    }
 }
 
 enum CalendarAccess: Equatable {
@@ -141,7 +154,7 @@ struct CalendarChoice {
 final class CalendarStore {
     var onChange: (([Meeting]) -> Void)?
     /// Your Google accounts, for the Calendar and Drive shortcuts.
-    var onAccounts: (([String]) -> Void)?
+    var onAccounts: (([GoogleAccount]) -> Void)?
     var onAccessChange: ((CalendarAccess) -> Void)?
 
     private(set) var access: CalendarAccess
@@ -233,12 +246,26 @@ final class CalendarStore {
     private static let appleDomains = ["icloud.com", "me.com", "mac.com"]
 
     /// The accounts your own calendars belong to, minus iCloud: in practice
-    /// the Google accounts added in Internet Accounts.
-    private func googleAccounts() -> [String] {
+    /// the Google accounts added in Internet Accounts. Each gets the color of
+    /// its main calendar, so it matches Calendar, and no two share a color.
+    private func googleAccounts() -> [GoogleAccount] {
         let own = store.calendars(for: .event).filter { Self.isIncluded($0, overrides: [:]) }
-        return Self.unique(own.compactMap { Self.account(of: $0) })
+        let emails = Self.unique(own.compactMap { Self.account(of: $0) })
             .filter { !Self.appleDomains.contains(Meeting.shortAccount($0)) }
             .sorted()
+
+        var used = Set<DeckColor>()
+        return emails.map { email in
+            let calendars = own.filter { Self.account(of: $0) == email }
+            // Google names your main calendar after your address.
+            let main = calendars.first { $0.title.lowercased() == email } ?? calendars.first
+            var color = DeckColor.nearest(to: main?.color)
+            if used.contains(color) {
+                color = GoogleAccount.palette.first { !used.contains($0) } ?? color
+            }
+            used.insert(color)
+            return GoogleAccount(email: email, color: color)
+        }
     }
 
     private func fetch(overrides: [String: Bool]) -> [Meeting] {
