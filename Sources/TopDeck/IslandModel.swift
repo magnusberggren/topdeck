@@ -69,6 +69,7 @@ enum HoverTarget: Hashable {
     case settings
     case accessButton
     case meeting(String)
+    case accountLink(String)
     case calendarAccess
 }
 
@@ -88,6 +89,7 @@ protocol IslandActions: AnyObject {
     func setArranging(_ arranging: Bool)
     func dragRow(_ id: String, phase: PanPhase, translation: CGFloat)
     func join(_ meeting: Meeting, as account: String?)
+    func open(_ link: AccountLink)
     func showMenu(for meeting: Meeting)
     func requestCalendarAccess()
     func openCalendar()
@@ -321,6 +323,13 @@ final class IslandModel {
     var deckResults: [UUID: Bool] = [:]
 
     var meetings: [Meeting] = []
+    var googleAccounts: [String] = []
+
+    /// The Meetings row shows the next couple of calls; the reminder still
+    /// knows about all of them.
+    static let shownMeetings = 2
+    var visibleMeetings: [Meeting] { Array(meetings.prefix(Self.shownMeetings)) }
+    var accountLinks: [AccountLink] { AccountLink.all(for: googleAccounts) }
     var calendarAccess: CalendarAccess = .notDetermined
 
     let thumbnails = ThumbnailStore()
@@ -359,7 +368,7 @@ final class IslandModel {
     var tileCount: Int {
         switch currentPage?.kind {
         case .shortcuts: deckKeys.count + 1
-        case .meetings: calendarAccess == .granted ? meetings.count : 0
+        case .meetings: calendarAccess == .granted ? max(visibleMeetings.count, 1) + accountLinks.count : 0
         default: pageDownloads.count + items.count
         }
     }

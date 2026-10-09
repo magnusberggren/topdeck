@@ -65,6 +65,54 @@ extension Meeting {
 }
 #endif
 
+/// Google Calendar or Drive, opened as one particular account.
+struct AccountLink: Identifiable, Equatable {
+    enum Kind: CaseIterable { case calendar, drive }
+
+    let kind: Kind
+    let account: String
+
+    var id: String { "\(kind)|\(account)" }
+
+    var title: String {
+        switch kind {
+        case .calendar: "Calendar"
+        case .drive: "Drive"
+        }
+    }
+
+    var symbol: String {
+        switch kind {
+        case .calendar: "calendar"
+        case .drive: "externaldrive.fill"
+        }
+    }
+
+    var color: DeckColor {
+        switch kind {
+        case .calendar: .blue
+        case .drive: .green
+        }
+    }
+
+    /// Like Meet, both pick the signed-in account from `authuser`, so they
+    /// open as this account without switching in the browser.
+    var url: URL {
+        let base = switch kind {
+        case .calendar: "https://calendar.google.com/calendar/r"
+        case .drive: "https://drive.google.com/drive/my-drive"
+        }
+        var components = URLComponents(string: base)!
+        components.queryItems = [URLQueryItem(name: "authuser", value: account)]
+        return components.url!
+    }
+
+    /// Calendar and Drive for each account, account by account.
+    static func all(for accounts: [String]) -> [AccountLink] {
+        accounts.flatMap { account in Kind.allCases.map { AccountLink(kind: $0, account: account) } }
+    }
+}
+
 enum CalendarAccess: Equatable {
     case notDetermined
     case granted
@@ -85,6 +133,8 @@ struct CalendarChoice {
 /// sign-in of its own. State is only touched on the main thread.
 final class CalendarStore {
     var onChange: (([Meeting]) -> Void)?
+    /// Your Google accounts, for the Calendar and Drive shortcuts.
+    var onAccounts: (([String]) -> Void)?
     var onAccessChange: ((CalendarAccess) -> Void)?
 
     private(set) var access: CalendarAccess
@@ -142,7 +192,11 @@ final class CalendarStore {
         queue.async { [weak self] in
             guard let self else { return }
             let meetings = self.fetch(overrides: overrides)
-            DispatchQueue.main.async { self.onChange?(meetings) }
+            let accounts = self.googleAccounts()
+            DispatchQueue.main.async {
+                self.onChange?(meetings)
+                self.onAccounts?(accounts)
+            }
         }
     }
 
@@ -169,13 +223,23 @@ final class CalendarStore {
 
     // MARK: - Reading
 
+    private static let appleDomains = ["icloud.com", "me.com", "mac.com"]
+
+    /// The accounts your own calendars belong to, minus iCloud: in practice
+    /// the Google accounts added in Internet Accounts.
+    private func googleAccounts() -> [String] {
+        let own = store.calendars(for: .event).filter { Self.isIncluded($0, overrides: [:]) }
+        return Self.unique(own.compactMap { Self.account(of: $0) })
+            .filter { !Self.appleDomains.contains(Meeting.shortAccount($0)) }
+            .sorted()
+    }
+
     private func fetch(overrides: [String: Bool]) -> [Meeting] {
         let calendars = store.calendars(for: .event).filter { Self.isIncluded($0, overrides: overrides) }
         guard !calendars.isEmpty else { return [] }
         // Every account you could join as, for "Join As".
-        let appleDomains = ["icloud.com", "me.com", "mac.com"]
         let known = Self.unique(calendars.compactMap { Self.account(of: $0) })
-            .filter { !appleDomains.contains(Meeting.shortAccount($0)) }
+            .filter { !Self.appleDomains.contains(Meeting.shortAccount($0)) }
 
         let now = Date()
         // Starting a little back catches calls already under way.
