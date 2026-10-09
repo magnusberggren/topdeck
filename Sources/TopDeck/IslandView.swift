@@ -1087,7 +1087,7 @@ private struct MeetingTile: View {
         let isSoon = meeting.isSoon(at: now)
 
         VStack(spacing: 0) {
-            DeckKeyFace(symbol: "video.fill", color: meeting.color, size: 52)
+            ServiceFace(meeting: meeting, model: model, size: 52)
                 .overlay(alignment: .topTrailing) {
                     if isLive {
                         Text("LIVE")
@@ -1163,6 +1163,49 @@ private struct MeetingTile: View {
     }
 }
 
+/// Google's own icon on a white key, like its app icons, or a plain symbol
+/// key until the icon has been fetched.
+private struct ProductFace: View {
+    let icon: NSImage?
+    let symbol: String
+    let color: DeckColor
+    let size: CGFloat
+
+    var body: some View {
+        if let icon {
+            RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+                .fill(.white)
+                .overlay(
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .padding(size * 0.17)
+                )
+                .frame(width: size, height: size)
+                .transition(.opacity)
+        } else {
+            DeckKeyFace(symbol: symbol, color: color, size: size)
+        }
+    }
+}
+
+/// Google Meet calls get the Meet icon; Zoom, Teams and the rest a camera.
+private struct ServiceFace: View {
+    let meeting: Meeting
+    let model: IslandModel
+    let size: CGFloat
+
+    var body: some View {
+        ProductFace(
+            icon: meeting.service == .meet ? model.googleIcons[.meet] : nil,
+            symbol: "video.fill",
+            color: meeting.color,
+            size: size
+        )
+    }
+}
+
 /// Google Calendar or Drive, opened as one of your accounts.
 private struct AccountLinkTile: View {
     let link: AccountLink
@@ -1174,7 +1217,7 @@ private struct AccountLinkTile: View {
         let isPressed = model.pressed == target
 
         VStack(spacing: 0) {
-            DeckKeyFace(symbol: link.symbol, color: link.color, size: 52)
+            ProductFace(icon: model.googleIcons[link.product], symbol: link.symbol, color: link.color, size: 52)
                 .shadow(color: link.color.base.opacity(isHovered ? 0.55 : 0), radius: 10, y: 2)
                 .scaleEffect(isPressed ? 0.88 : (isHovered ? 1.07 : 1))
                 .frame(width: 70, height: 54)
@@ -1379,7 +1422,7 @@ private struct MeetingPeek: View {
 
         TimelineView(.periodic(from: .now, by: 5)) { context in
             HStack(spacing: 11) {
-                DeckKeyFace(symbol: "video.fill", color: meeting.color, size: 34)
+                ServiceFace(meeting: meeting, model: model, size: 34)
                     .scaleEffect(isPressed ? 0.92 : (isHovered ? 1.08 : 1))
 
                 VStack(alignment: .leading, spacing: 1) {

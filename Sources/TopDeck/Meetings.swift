@@ -88,6 +88,13 @@ struct AccountLink: Identifiable, Equatable {
         }
     }
 
+    var product: GoogleProduct {
+        switch kind {
+        case .calendar: .calendar
+        case .drive: .drive
+        }
+    }
+
     var color: DeckColor {
         switch kind {
         case .calendar: .blue
@@ -405,6 +412,52 @@ extension DeckColor {
         case ..<260: return .indigo
         case ..<300: return .purple
         default: return .pink
+        }
+    }
+}
+
+/// Google's own product icons. They're Google's trademarks, so they aren't
+/// shipped with the app: they're fetched from Google the first time the
+/// Meetings page needs them and kept in Caches. Until then, and offline,
+/// tiles fall back to plain symbols.
+enum GoogleProduct: String, CaseIterable {
+    case meet, calendar, drive
+
+    fileprivate var url: URL {
+        URL(string: "https://ssl.gstatic.com/images/branding/product/1x/\(rawValue)_2020q4_512dp.png")!
+    }
+}
+
+final class GoogleIcons {
+    var onLoad: ((GoogleProduct, NSImage) -> Void)?
+
+    private var requested = Set<GoogleProduct>()
+
+    private static var folder: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return caches.appendingPathComponent("TopDeck/GoogleIcons", isDirectory: true)
+    }
+
+    /// Reports each icon from the cache, downloading the ones it doesn't have yet.
+    func load() {
+        for product in GoogleProduct.allCases where !requested.contains(product) {
+            requested.insert(product)
+            let file = Self.folder.appendingPathComponent(product.rawValue + ".png")
+            if let image = NSImage(contentsOf: file) {
+                onLoad?(product, image)
+                continue
+            }
+            URLSession.shared.dataTask(with: product.url) { [weak self] data, response, _ in
+                guard let data, (response as? HTTPURLResponse)?.statusCode == 200,
+                      let image = NSImage(data: data), image.isValid else {
+                    // Try again next time the page opens.
+                    DispatchQueue.main.async { self?.requested.remove(product) }
+                    return
+                }
+                try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+                try? data.write(to: file, options: .atomic)
+                DispatchQueue.main.async { self?.onLoad?(product, image) }
+            }.resume()
         }
     }
 }
