@@ -65,6 +65,16 @@ extension Meeting {
 }
 #endif
 
+/// A Google account TopDeck found or was given, and whether it's on the
+/// Meetings page.
+struct AccountChoice: Equatable {
+    enum Source { case calendarAccount, sharedCalendar, added }
+
+    let account: GoogleAccount
+    let source: Source
+    let isShown: Bool
+}
+
 /// One of your Google accounts, with a color to tell it apart.
 struct GoogleAccount: Identifiable, Equatable {
     let email: String
@@ -154,7 +164,7 @@ struct CalendarChoice {
 final class CalendarStore {
     var onChange: (([Meeting]) -> Void)?
     /// Your Google accounts, for the Calendar and Drive shortcuts.
-    var onAccounts: (([GoogleAccount]) -> Void)?
+    var onAccounts: (([AccountChoice]) -> Void)?
     var onAccessChange: ((CalendarAccess) -> Void)?
 
     private(set) var access: CalendarAccess
@@ -209,10 +219,12 @@ final class CalendarStore {
         setAccess(Self.currentAccess())
         guard access == .granted else { return }
         let overrides = Preferences.calendarOverrides
+        let shown = Preferences.accountChoices
+        let added = Preferences.addedAccounts
         queue.async { [weak self] in
             guard let self else { return }
             let meetings = self.fetch(overrides: overrides)
-            let accounts = self.googleAccounts()
+            let accounts = self.accountChoices(shown: shown, added: added)
             DispatchQueue.main.async {
                 self.onChange?(meetings)
                 self.onAccounts?(accounts)
@@ -248,24 +260,56 @@ final class CalendarStore {
     /// The accounts your own calendars belong to, minus iCloud: in practice
     /// the Google accounts added in Internet Accounts. Each gets the color of
     /// its main calendar, so it matches Calendar, and no two share a color.
-    private func googleAccounts() -> [GoogleAccount] {
-        let own = store.calendars(for: .event).filter { Self.isIncluded($0, overrides: [:]) }
-        let emails = Self.unique(own.compactMap { Self.account(of: $0) })
+    /// Every Google account TopDeck could show, and whether it does:
+    /// - accounts added to the Mac (Internet Accounts), shown unless hidden;
+    /// - addresses of calendars shared into those accounts from another
+    ///   domain (say a personal Gmail shared into a work account), hidden
+    ///   unless picked. Same-domain addresses are colleagues, so they're left out;
+    /// - addresses added by hand, shown unless hidden.
+    private func accountChoices(shown: [String: Bool], added: [String]) -> [AccountChoice] {
+        let all = store.calendars(for: .event)
+        let own = all.filter { Self.isIncluded($0, overrides: [:]) }
+        let ownEmails = Self.unique(own.compactMap { Self.account(of: $0) })
             .filter { !Self.appleDomains.contains(Meeting.shortAccount($0)) }
             .sorted()
+        let ownDomains = Set(ownEmails.map(Meeting.shortAccount))
 
-        var used = Set<DeckColor>()
-        return emails.map { email in
+        var candidates: [(email: String, source: AccountChoice.Source, calendar: EKCalendar?)] = []
+        for email in ownEmails {
             let calendars = own.filter { Self.account(of: $0) == email }
             // Google names your main calendar after your address.
-            let main = calendars.first { $0.title.lowercased() == email } ?? calendars.first
-            var color = DeckColor.nearest(to: main?.color)
+            candidates.append((email, .calendarAccount, calendars.first { $0.title.lowercased() == email } ?? calendars.first))
+        }
+        for calendar in all {
+            let email = calendar.title.lowercased().trimmingCharacters(in: .whitespaces)
+            guard Self.looksLikeEmail(email), !candidates.contains(where: { $0.email == email }),
+                  !ownDomains.contains(Meeting.shortAccount(email)),
+                  !Self.appleDomains.contains(Meeting.shortAccount(email)) else { continue }
+            candidates.append((email, .sharedCalendar, calendar))
+        }
+        for email in added.map({ $0.lowercased() }) where !candidates.contains(where: { $0.email == email }) {
+            candidates.append((email, .added, nil))
+        }
+
+        var used = Set<DeckColor>()
+        return candidates.map { candidate in
+            var color = candidate.calendar.map { DeckColor.nearest(to: $0.color) }
+                ?? GoogleAccount.palette.first { !used.contains($0) } ?? .blue
             if used.contains(color) {
                 color = GoogleAccount.palette.first { !used.contains($0) } ?? color
             }
             used.insert(color)
-            return GoogleAccount(email: email, color: color)
+            return AccountChoice(
+                account: GoogleAccount(email: candidate.email, color: color),
+                source: candidate.source,
+                isShown: shown[candidate.email] ?? (candidate.source != .sharedCalendar)
+            )
         }
+    }
+
+    static func looksLikeEmail(_ text: String) -> Bool {
+        let parts = text.split(separator: "@")
+        return parts.count == 2 && !parts[0].isEmpty && parts[1].contains(".") && !text.contains(" ")
     }
 
     private func fetch(overrides: [String: Bool]) -> [Meeting] {

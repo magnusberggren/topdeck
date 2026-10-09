@@ -49,7 +49,7 @@ enum DeckColor: String, Codable, CaseIterable {
         }
     }
 
-    private var nsColor: NSColor { NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1) }
+    var nsColor: NSColor { NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1) }
 
     var base: Color { Color(nsColor: nsColor) }
 
