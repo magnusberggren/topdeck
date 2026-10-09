@@ -14,7 +14,9 @@ struct IslandView: View {
                 .frame(width: metrics.expandedBody.width, height: metrics.expandedBody.height)
                 .modifier(Reveal(isVisible: model.state == .expanded))
 
-            PeekView(model: model)
+            // Passed down as a value: reading `model.state` inside the preview
+            // alone missed the moment it opened, so it never became clickable.
+            PeekView(model: model, isOpen: model.state == .peek)
                 .frame(width: metrics.peekBody.width, height: metrics.peekBody.height)
                 .modifier(Reveal(isVisible: model.state == .peek))
 
@@ -1193,6 +1195,7 @@ private struct CalendarAccessView: View {
 
 private struct PeekView: View {
     let model: IslandModel
+    let isOpen: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1200,11 +1203,11 @@ private struct PeekView: View {
             Group {
                 switch model.peek {
                 case .download(let item, _, let label):
-                    DownloadPeek(item: item, label: label, model: model)
+                    DownloadPeek(item: item, label: label, model: model, isOpen: isOpen)
                 case .message(let title, let subtitle, let symbol):
                     MessagePeek(title: title, subtitle: subtitle, symbol: symbol)
                 case .meeting(let meeting):
-                    MeetingPeek(meeting: meeting, model: model)
+                    MeetingPeek(meeting: meeting, model: model, isOpen: isOpen)
                 case nil:
                     Color.clear
                 }
@@ -1220,6 +1223,7 @@ private struct DownloadPeek: View {
     let item: DownloadItem
     let label: String
     let model: IslandModel
+    let isOpen: Bool
 
     var body: some View {
         // Results like an installed app aren't in the thumbnail cache.
@@ -1261,7 +1265,7 @@ private struct DownloadPeek: View {
         .animation(.spring(response: 0.22, dampingFraction: 0.6), value: isPressed)
         .contentShape(Rectangle())
         .overlay {
-            if model.state == .peek {
+            if isOpen {
                 MouseInteraction(
                     target: .peek,
                     model: model,
@@ -1284,6 +1288,7 @@ private struct DownloadPeek: View {
 private struct MeetingPeek: View {
     let meeting: Meeting
     let model: IslandModel
+    let isOpen: Bool
 
     private static let green = Color(red: 0.2, green: 0.78, blue: 0.35)
 
@@ -1327,7 +1332,7 @@ private struct MeetingPeek: View {
         .animation(.spring(response: 0.22, dampingFraction: 0.6), value: isPressed)
         .contentShape(Rectangle())
         .overlay {
-            if model.state == .peek {
+            if isOpen {
                 MouseInteraction(
                     target: .peek,
                     model: model,
