@@ -51,7 +51,7 @@ xcrun notarytool store-credentials notary --apple-id <Apple ID> --team-id AURJLA
 - **Click** a file to open it.
 - **Drag** a file out to move it, like dragging out of Finder. Hold Option to copy. The island gets out of the way as soon as the file leaves it.
 - **New-file preview:** when a file lands, the notch shows it for a few seconds. Point at the preview to keep it up, then click to open it or drag it straight out. Point at the notch itself to open the full shelf.
-- **Meetings page:** your next two video calls (Google Meet, Zoom, Teams and more) from every account in the Calendar app, then Google Calendar and Google Drive for each of your Google accounts, each opening as that account. Click a call to join. Google Meet opens as the account that was invited, so you never have to switch accounts in the browser. Right-click for Join As, Copy Link and Show in Calendar. A minute before a call starts it pops out of the notch with a Join button; turn that off under ⋯ › Remind 1 Minute Before on the Meetings page. Only your own calendars count by default, not ones colleagues share with you; change that under ⋯ › Calendars. Add your Google accounts in System Settings › Internet Accounts if they aren't in Calendar yet.
+- **Meetings page:** your next two video calls (Google Meet, Zoom, Teams and more) from every account in the Calendar app, then Google Calendar and Google Drive for each of your Google accounts, each opening as that account. The Google icons are Google's trademarks, so they aren't in this repo; the app fetches them from Google the first time and keeps them in Caches. Click a call to join. Google Meet opens as the account that was invited, so you never have to switch accounts in the browser. Right-click for Join As, Copy Link and Show in Calendar. A minute before a call starts it pops out of the notch with a Join button; turn that off under ⋯ › Remind 1 Minute Before on the Meetings page. Only your own calendars count by default, not ones colleagues share with you; change that under ⋯ › Calendars. Add your Google accounts in System Settings › Internet Accounts if they aren't in Calendar yet.
 - **Any display:** ⋯ › Show On puts the island on the display you choose. Displays without a notch (like a Mac Studio's) get a drawn notch at the top center, always visible.
 - **Same setup on every Mac:** your Apple ID is the account. Shortcuts and settings (folders, row order, pages, reminders, hidden calendars) live in your own iCloud Drive, so installing TopDeck on another Mac signed in to the same Apple ID brings your setup along. Which display the island uses stays per Mac. Turn it off with ⋯ › Sync with iCloud. On the Shortcuts page, Export Shortcuts… and Import Shortcuts… share shortcuts with someone else as a file.
 - **Right-click** for Open With, Show in Finder, Quick Look, Copy and Move to Trash.
@@ -86,8 +86,10 @@ screen instead.
 ## Privacy
 
 TopDeck has no server and no account of its own. Your files, calendar and
-shortcuts stay on your Mac and in your own iCloud Drive. The only thing it
-asks the internet for is whether there's a newer version on GitHub.
+shortcuts stay on your Mac and in your own iCloud Drive. It only goes online
+to ask GitHub whether there's a newer version, and, once, to fetch the Google
+Meet, Calendar and Drive icons from Google for the Meetings page. Nothing about
+you is sent either time.
 
 ## Permissions
 

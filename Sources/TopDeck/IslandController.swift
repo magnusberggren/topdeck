@@ -67,6 +67,7 @@ final class IslandController: NSObject, IslandActions {
     private var settingsPush: DispatchWorkItem?
     private var syncCheckTimer: Timer?
     private let calendar = CalendarStore()
+    private let googleIcons = GoogleIcons()
     private var toastTimer: Timer?
     private var cleanupConfirmTimer: Timer?
 
@@ -132,8 +133,13 @@ final class IslandController: NSObject, IslandActions {
             self.scheduleReminder()
         }
         calendar.onAccounts = { [weak self] accounts in
-            guard let self, accounts != self.model.googleAccounts else { return }
+            guard let self else { return }
+            if !accounts.isEmpty { self.googleIcons.load() }
+            guard accounts != self.model.googleAccounts else { return }
             self.model.googleAccounts = accounts
+        }
+        googleIcons.onLoad = { [weak self] product, image in
+            self?.model.googleIcons[product] = image
         }
         calendar.refresh()
         progressWatcher.onChange = { [weak self] downloads in
@@ -1772,6 +1778,7 @@ final class IslandController: NSObject, IslandActions {
             switch value {
             case "meetingpeek":
                 // A meeting reminder with a sample call starting in a minute.
+                googleIcons.load()
                 if var meeting = Meeting.samples.dropFirst().first {
                     meeting.start = Date().addingTimeInterval(55)
                     showPeek(.meeting(meeting), duration: 3600)
@@ -1808,6 +1815,7 @@ final class IslandController: NSObject, IslandActions {
                     self.calendar.onAccounts = nil
                     self.model.meetings = Meeting.samples
                     self.model.googleAccounts = ["you@side.example", "you@work.example"]
+                    self.googleIcons.load()
                     self.selectPage(index)
                 }
                 if env["QF_DEBUG_ARRANGE"] != nil {

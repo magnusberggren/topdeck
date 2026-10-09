@@ -324,6 +324,7 @@ final class IslandModel {
 
     var meetings: [Meeting] = []
     var googleAccounts: [String] = []
+    var googleIcons: [GoogleProduct: NSImage] = [:]
 
     /// The Meetings row shows the next couple of calls; the reminder still
     /// knows about all of them.
