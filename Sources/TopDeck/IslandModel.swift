@@ -323,14 +323,15 @@ final class IslandModel {
     var deckResults: [UUID: Bool] = [:]
 
     var meetings: [Meeting] = []
-    var googleAccounts: [String] = []
+    var googleAccounts: [GoogleAccount] = []
     var googleIcons: [GoogleProduct: NSImage] = [:]
 
     /// The Meetings row shows the next couple of calls; the reminder still
     /// knows about all of them.
     static let shownMeetings = 2
     var visibleMeetings: [Meeting] { Array(meetings.prefix(Self.shownMeetings)) }
-    var accountLinks: [AccountLink] { AccountLink.all(for: googleAccounts) }
+    /// Space before each account's group of tiles, on top of the tile spacing.
+    static let accountGroupGap: CGFloat = 10
     var calendarAccess: CalendarAccess = .notDetermined
 
     let thumbnails = ThumbnailStore()
@@ -369,14 +370,20 @@ final class IslandModel {
     var tileCount: Int {
         switch currentPage?.kind {
         case .shortcuts: deckKeys.count + 1
-        case .meetings: calendarAccess == .granted ? max(visibleMeetings.count, 1) + accountLinks.count : 0
+        case .meetings:
+            calendarAccess == .granted
+                ? max(visibleMeetings.count, 1) + googleAccounts.reduce(0) { $0 + $1.links.count }
+                : 0
         default: pageDownloads.count + items.count
         }
     }
 
     var maxScrollOffset: CGFloat {
         let count = CGFloat(tileCount)
-        let content = count * IslandMetrics.tileWidth + max(0, count - 1) * IslandMetrics.tileSpacing
+        var content = count * IslandMetrics.tileWidth + max(0, count - 1) * IslandMetrics.tileSpacing
+        if currentPage?.kind == .meetings {
+            content += CGFloat(googleAccounts.count) * Self.accountGroupGap
+        }
         return max(0, content - metrics.rowWidth)
     }
 }

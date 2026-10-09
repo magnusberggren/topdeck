@@ -1814,7 +1814,11 @@ final class IslandController: NSObject, IslandActions {
                     self.model.calendarAccess = .granted
                     self.calendar.onAccounts = nil
                     self.model.meetings = Meeting.samples
-                    self.model.googleAccounts = ["you@side.example", "you@work.example"]
+                    self.model.googleAccounts = [
+                        GoogleAccount(email: "you@side.example", color: .orange),
+                        GoogleAccount(email: "you@studio.example", color: .purple),
+                        GoogleAccount(email: "you@work.example", color: .blue),
+                    ]
                     self.googleIcons.load()
                     self.selectPage(index)
                 }

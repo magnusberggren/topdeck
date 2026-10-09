@@ -132,7 +132,7 @@ private struct PageContent: View {
                 button: "Open System Settings"
             )
         case .granted:
-            if model.meetings.isEmpty && model.accountLinks.isEmpty {
+            if model.meetings.isEmpty && model.googleAccounts.isEmpty {
                 PlaceholderView(symbol: "video.slash", text: "No video calls in the next 7 days")
             } else {
                 MeetingsView(model: model)
@@ -1042,14 +1042,20 @@ private struct MeetingsView: View {
         TimelineView(.everyMinute) { context in
             HStack(spacing: IslandMetrics.tileSpacing) {
                 ForEach(model.visibleMeetings) { meeting in
-                    MeetingTile(meeting: meeting, model: model, now: context.date)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    MeetingTile(
+                        meeting: meeting,
+                        model: model,
+                        now: context.date,
+                        isNext: meeting.id == model.visibleMeetings.first?.id
+                    )
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
                 if model.visibleMeetings.isEmpty {
                     NoCallsTile()
                 }
-                ForEach(model.accountLinks) { link in
-                    AccountLinkTile(link: link, model: model)
+                ForEach(model.googleAccounts) { account in
+                    AccountGroup(account: account, model: model)
+                        .padding(.leading, IslandModel.accountGroupGap)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
@@ -1076,6 +1082,8 @@ private struct MeetingTile: View {
     let meeting: Meeting
     let model: IslandModel
     let now: Date
+    /// The first call coming up gets a card of its own.
+    var isNext = false
 
     private static let green = Color(red: 0.2, green: 0.78, blue: 0.35)
 
@@ -1090,13 +1098,9 @@ private struct MeetingTile: View {
             ServiceFace(meeting: meeting, model: model, size: 52)
                 .overlay(alignment: .topTrailing) {
                     if isLive {
-                        Text("LIVE")
-                            .font(.system(size: 8, weight: .heavy))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1.5)
-                            .background(Capsule().fill(Color.red))
-                            .offset(x: 6, y: -4)
+                        Self.badge("LIVE", color: .red)
+                    } else if isNext {
+                        Self.badge("NEXT", color: Color(red: 0.04, green: 0.52, blue: 1.0))
                     }
                 }
                 .shadow(color: (isSoon ? Self.green : meeting.color.base).opacity(isHovered || isSoon ? 0.55 : 0), radius: 10, y: 2)
@@ -1125,8 +1129,14 @@ private struct MeetingTile: View {
         .frame(width: IslandMetrics.tileWidth, height: IslandMetrics.tileHeight, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.white.opacity(isHovered ? 0.08 : 0))
+                .fill(cardFill(isHovered: isHovered, isSoon: isSoon))
         )
+        .overlay {
+            if isNext {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(isSoon ? Self.green.opacity(0.7) : .white.opacity(0.2), lineWidth: 1)
+            }
+        }
         .overlay {
             if model.state == .expanded {
                 MouseInteraction(
@@ -1143,6 +1153,22 @@ private struct MeetingTile: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(meeting.title), \(Self.timeLabel(for: meeting, now: now))")
         .accessibilityAddTraits(.isButton)
+    }
+
+    private func cardFill(isHovered: Bool, isSoon: Bool) -> Color {
+        guard isNext else { return .white.opacity(isHovered ? 0.08 : 0) }
+        if isSoon { return Self.green.opacity(isHovered ? 0.24 : 0.16) }
+        return .white.opacity(isHovered ? 0.13 : 0.08)
+    }
+
+    private static func badge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 8, weight: .heavy))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(color))
+            .offset(x: 6, y: -4)
     }
 
     /// Which account it opens as, since that's the whole point.
@@ -1206,9 +1232,61 @@ private struct ServiceFace: View {
     }
 }
 
+/// One Google account's Calendar and Drive, framed in the account's color
+/// and named once underneath, so accounts don't blur together.
+private struct AccountGroup: View {
+    let account: GoogleAccount
+    let model: IslandModel
+
+    var body: some View {
+        let color = account.color.base
+        HStack(spacing: IslandMetrics.tileSpacing) {
+            ForEach(account.links) { link in
+                AccountLinkTile(link: link, account: account, model: model)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(color.opacity(0.14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(color.opacity(0.4), lineWidth: 1)
+                )
+        )
+        .overlay(alignment: .bottom) {
+            HStack(spacing: 5) {
+                Circle().fill(color).frame(width: 7, height: 7)
+                Text(account.label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+            }
+            .padding(.bottom, 9)
+            .allowsHitTesting(false)
+        }
+        .help(account.email)
+    }
+}
+
+/// The account's letter on a colored dot, like a Google profile picture.
+private struct AccountAvatar: View {
+    let account: GoogleAccount
+    let size: CGFloat
+
+    var body: some View {
+        Text(account.initial)
+            .font(.system(size: size * 0.58, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(Circle().fill(account.color.base))
+            .overlay(Circle().strokeBorder(.black.opacity(0.6), lineWidth: 1.5))
+    }
+}
+
 /// Google Calendar or Drive, opened as one of your accounts.
 private struct AccountLinkTile: View {
     let link: AccountLink
+    let account: GoogleAccount
     let model: IslandModel
 
     var body: some View {
@@ -1218,31 +1296,28 @@ private struct AccountLinkTile: View {
 
         VStack(spacing: 0) {
             ProductFace(icon: model.googleIcons[link.product], symbol: link.symbol, color: link.color, size: 52)
-                .shadow(color: link.color.base.opacity(isHovered ? 0.55 : 0), radius: 10, y: 2)
+                .overlay(alignment: .bottomTrailing) {
+                    AccountAvatar(account: account, size: 18)
+                        .offset(x: 5, y: 5)
+                }
+                .shadow(color: account.color.base.opacity(isHovered ? 0.55 : 0), radius: 10, y: 2)
                 .scaleEffect(isPressed ? 0.88 : (isHovered ? 1.07 : 1))
                 .frame(width: 70, height: 54)
                 .padding(.bottom, 8)
 
+            // The group names the account underneath.
             Text(link.title)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
                 .frame(height: 28, alignment: .top)
-
-            // Which account, since that's the point of the tile.
-            Text(Meeting.shortAccount(link.account))
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(isHovered ? 0.75 : 0.42))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .padding(.top, 1)
         }
         .padding(.top, 10)
         .padding(.horizontal, 4)
         .frame(width: IslandMetrics.tileWidth, height: IslandMetrics.tileHeight, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.white.opacity(isHovered ? 0.08 : 0))
+                .fill(.white.opacity(isHovered ? 0.1 : 0))
         )
         .overlay {
             if model.state == .expanded {
