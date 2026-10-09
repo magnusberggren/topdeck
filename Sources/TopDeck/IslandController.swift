@@ -131,6 +131,10 @@ final class IslandController: NSObject, IslandActions {
             }
             self.scheduleReminder()
         }
+        calendar.onAccounts = { [weak self] accounts in
+            guard let self, accounts != self.model.googleAccounts else { return }
+            self.model.googleAccounts = accounts
+        }
         calendar.refresh()
         progressWatcher.onChange = { [weak self] downloads in
             self?.reportedDownloads = downloads
@@ -636,6 +640,12 @@ final class IslandController: NSObject, IslandActions {
         Haptics.perform(.generic)
         collapse(waitForPointerToLeave: true)
         NSWorkspace.shared.open(meeting.joinURL(as: account))
+    }
+
+    func open(_ link: AccountLink) {
+        Haptics.perform(.generic)
+        collapse(waitForPointerToLeave: true)
+        NSWorkspace.shared.open(link.url)
     }
 
     func requestCalendarAccess() {
@@ -1795,7 +1805,9 @@ final class IslandController: NSObject, IslandActions {
                     self.calendar.onChange = nil
                     self.calendar.onAccessChange = nil
                     self.model.calendarAccess = .granted
+                    self.calendar.onAccounts = nil
                     self.model.meetings = Meeting.samples
+                    self.model.googleAccounts = ["you@side.example", "you@work.example"]
                     self.selectPage(index)
                 }
                 if env["QF_DEBUG_ARRANGE"] != nil {

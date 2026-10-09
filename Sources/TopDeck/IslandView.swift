@@ -132,7 +132,7 @@ private struct PageContent: View {
                 button: "Open System Settings"
             )
         case .granted:
-            if model.meetings.isEmpty {
+            if model.meetings.isEmpty && model.accountLinks.isEmpty {
                 PlaceholderView(symbol: "video.slash", text: "No video calls in the next 7 days")
             } else {
                 MeetingsView(model: model)
@@ -1041,8 +1041,15 @@ private struct MeetingsView: View {
 
         TimelineView(.everyMinute) { context in
             HStack(spacing: IslandMetrics.tileSpacing) {
-                ForEach(model.meetings) { meeting in
+                ForEach(model.visibleMeetings) { meeting in
                     MeetingTile(meeting: meeting, model: model, now: context.date)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
+                if model.visibleMeetings.isEmpty {
+                    NoCallsTile()
+                }
+                ForEach(model.accountLinks) { link in
+                    AccountLinkTile(link: link, model: model)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
@@ -1153,6 +1160,80 @@ private struct MeetingTile: View {
         if calendar.isDateInToday(meeting.start) { return time }
         if calendar.isDateInTomorrow(meeting.start) { return "Tomorrow \(time)" }
         return meeting.start.formatted(.dateTime.weekday(.abbreviated)) + " " + time
+    }
+}
+
+/// Google Calendar or Drive, opened as one of your accounts.
+private struct AccountLinkTile: View {
+    let link: AccountLink
+    let model: IslandModel
+
+    var body: some View {
+        let target = HoverTarget.accountLink(link.id)
+        let isHovered = model.hovered == target
+        let isPressed = model.pressed == target
+
+        VStack(spacing: 0) {
+            DeckKeyFace(symbol: link.symbol, color: link.color, size: 52)
+                .shadow(color: link.color.base.opacity(isHovered ? 0.55 : 0), radius: 10, y: 2)
+                .scaleEffect(isPressed ? 0.88 : (isHovered ? 1.07 : 1))
+                .frame(width: 70, height: 54)
+                .padding(.bottom, 8)
+
+            Text(link.title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .frame(height: 28, alignment: .top)
+
+            // Which account, since that's the point of the tile.
+            Text(Meeting.shortAccount(link.account))
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(isHovered ? 0.75 : 0.42))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.top, 1)
+        }
+        .padding(.top, 10)
+        .padding(.horizontal, 4)
+        .frame(width: IslandMetrics.tileWidth, height: IslandMetrics.tileHeight, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.white.opacity(isHovered ? 0.08 : 0))
+        )
+        .overlay {
+            if model.state == .expanded {
+                MouseInteraction(target: target, model: model) { model.actions?.open(link) }
+            }
+        }
+        .help("Open \(link.title) as \(link.account)")
+        .animation(.spring(response: 0.3, dampingFraction: 0.62), value: isHovered)
+        .animation(.spring(response: 0.18, dampingFraction: 0.55), value: isPressed)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Google \(link.title), \(link.account)")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Holds the meetings' place when there are none coming up.
+private struct NoCallsTile: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "video.slash")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(.white.opacity(0.3))
+                .frame(width: 70, height: 54)
+                .padding(.bottom, 8)
+            Text("No calls this week")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(height: 28, alignment: .top)
+        }
+        .padding(.top, 10)
+        .padding(.horizontal, 4)
+        .frame(width: IslandMetrics.tileWidth, height: IslandMetrics.tileHeight, alignment: .top)
     }
 }
 
