@@ -1297,7 +1297,26 @@ final class IslandController: NSObject, IslandActions {
         let center = NotificationCenter.default
         observers.append(center.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
-        ) { [weak self] _ in self?.updateScreen() })
+        ) { [weak self] _ in
+            self?.updateScreen()
+            // macOS can still move the window after this, when a display goes away.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self?.updateScreen() }
+        })
+
+        // Nothing else should move the island. If something does (macOS
+        // rescuing it from a display that went away), put it straight back.
+        for name in [NSWindow.didMoveNotification, NSWindow.didChangeScreenNotification] {
+            observers.append(center.addObserver(forName: name, object: panel, queue: .main) { [weak self] _ in
+                DispatchQueue.main.async { self?.snapBackIfMoved() }
+            })
+        }
+
+        // Displays can come back in a different arrangement after sleep.
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+            observers.append(NSWorkspace.shared.notificationCenter.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in self?.updateScreen() })
+        }
 
         observers.append(center.addObserver(
             forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main
@@ -1320,6 +1339,13 @@ final class IslandController: NSObject, IslandActions {
         guard let metrics = IslandMetrics(screen: IslandMetrics.preferredScreen()) else { return }
         if metrics != model.metrics { model.metrics = metrics }
         panel.setFrame(metrics.windowFrame, display: true)
+    }
+
+    private func snapBackIfMoved() {
+        let frame = panel.frame, target = model.metrics.windowFrame
+        let moved = abs(frame.minX - target.minX) > 1 || abs(frame.maxY - target.maxY) > 1
+            || abs(frame.width - target.width) > 1 || abs(frame.height - target.height) > 1
+        if moved { updateScreen() }
     }
 
     // MARK: - IslandActions
